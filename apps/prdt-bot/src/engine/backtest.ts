@@ -71,6 +71,39 @@ export type ExternalContextProvider = (candles: Candle[]) => ExternalContext;
 
 const NO_EXTERNAL: ExternalContextProvider = () => ({ brokerforce: null });
 
+/**
+ * Build an ExternalContextProvider that feeds a cross-asset signal series
+ * (e.g. COREUSDT while backtesting BTCUSDT) with strict time alignment: the
+ * signal candles handed to the strategy always end at/before the entry bar's
+ * openTime, so the strategy can no more peek at CORE's future than at BTC's.
+ */
+export function alignedSignalProvider(
+  signalSymbol: string,
+  signalCandles: Candle[]
+): ExternalContextProvider {
+  const sorted = [...signalCandles].sort((a, b) => a.openTime - b.openTime);
+  return (candles: Candle[]) => {
+    const entry = candles[candles.length - 1];
+    if (entry === undefined) return { brokerforce: null, signal: null };
+    // Binary search: last signal candle with openTime <= entry.openTime.
+    let lo = 0;
+    let hi = sorted.length - 1;
+    let cut = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      const c = sorted[mid];
+      if (c !== undefined && c.openTime <= entry.openTime) {
+        cut = mid;
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    if (cut < 0) return { brokerforce: null, signal: null };
+    return { brokerforce: null, signal: { symbol: signalSymbol, candles: sorted.slice(0, cut + 1) } };
+  };
+}
+
 export function runBacktest(
   strategy: Strategy,
   candles: Candle[],

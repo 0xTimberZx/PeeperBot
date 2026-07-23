@@ -114,21 +114,40 @@ export class LiveEngine {
     const last = this.lastEntryAt.get(symbol) ?? 0;
     if (now - last < this.windowMs()) return; // previous round still open
 
+    const limit = Math.max(this.strategy.warmup + 5, 200);
     const candles = await fetchKlines({
       symbol,
       interval: this.cfg.interval as Interval,
-      limit: Math.max(this.strategy.warmup + 5, 200),
+      limit,
     });
     const entry = candles[candles.length - 1];
     if (entry === undefined || candles.length < this.strategy.warmup) return;
 
     const brokerforce = await this.bfProvider(symbol, candles);
+
+    // Cross-asset signal feed (e.g. COREUSDT as the market-health gate while
+    // trading BTC). Best-effort: a failed fetch degrades to null, never blocks.
+    let signalFeed: { symbol: string; candles: Candle[] } | null = null;
+    const sigSym = this.cfg.signalSymbol;
+    if (sigSym && sigSym !== symbol) {
+      try {
+        const sigCandles = await fetchKlines({
+          symbol: sigSym,
+          interval: this.cfg.interval as Interval,
+          limit,
+        });
+        if (sigCandles.length > 0) signalFeed = { symbol: sigSym, candles: sigCandles };
+      } catch {
+        signalFeed = null;
+      }
+    }
+
     const signal = this.strategy.evaluate({
       symbol,
       timeframeMin: this.cfg.timeframeMin,
       candles,
       entry,
-      external: { brokerforce },
+      external: { brokerforce, signal: signalFeed },
     });
 
     this.lastEntryAt.set(symbol, now);

@@ -73,6 +73,42 @@ Key knobs: `PRDT_SYMBOLS`, `PRDT_TIMEFRAME_MIN` (round window, 1–30), `STRATEG
 `CONFIDENCE_FLOOR` (raise it to trade less and more selectively), `POLL_SECONDS`,
 and the alert / BrokerForce / live-trading blocks.
 
+## The spike-fade strategy (the default)
+
+`spike-fade` is the primary strategy, built from the trader's observed
+mechanics of BTC on PRDT 30-min rounds, with CORE (COREUSDT — watched, not
+traded; PRDT doesn't offer it) as a market-health signal:
+
+1. **Fade the spike.** After a sharp displacement from the pre-spike mean
+   (|z| ≥ `minSpikeZ` in baseline-vol units), bet the opposite direction —
+   price wants to travel back. PRDT is path-independent (entry vs expiry only),
+   so the mid-window whip doesn't matter; the 30-min window gives the
+   reversion (sweet spot ~16–23 min) room to finish.
+2. **Never chase.** The spike's extreme must be ≥ `stallBars` old and the tape
+   since the peak must be calm — a still-extending spike or violent post-peak
+   zigzag is the classic late-entry trap, and we stand down.
+3. **Don't fade breakouts.** If the reversion has already run (> 50% retraced)
+   the edge is gone; if post-peak vol is a multiple of baseline, this may be a
+   breakout leg — mean-reversion's one lethal failure mode — so no entry.
+4. **CORE gate.** CORE follows BTC with a lag but grinds its lows far longer.
+   CORE printing fresh lows and still sliding ⇒ the market's "breath" isn't
+   done ⇒ UP fades are blocked. CORE turned up off a prior low ⇒ confidence
+   bonus for UP fades. (Mirrored lightly for DOWN fades into a CORE melt-up.)
+
+Tune it with data, not vibes — the **spike profiler** measures spike anatomy
+per volatility regime (how far spikes run past the apex, how often and how
+fast they half/full-retrace, breakout rate):
+
+```bash
+npm run profile --workspace=apps/prdt-bot -- --symbol BTCUSDT --candles 20000
+```
+
+Then backtest with the CORE feed aligned (strictly no-lookahead on both series):
+
+```bash
+npm run backtest --workspace=apps/prdt-bot -- --symbol BTCUSDT --signal COREUSDT --candles 20000
+```
+
 ## Plugging in your own formula
 
 The whole engine is strategy-agnostic. To backtest your formula:
