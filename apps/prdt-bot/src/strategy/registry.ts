@@ -6,6 +6,7 @@
 
 import type { Strategy } from "./types.js";
 import { BaselineStrategy } from "./baseline.js";
+import { SpikeFadeStrategy } from "./spikeFade.js";
 
 export type StrategyFactory = (params?: Record<string, unknown>) => Strategy;
 
@@ -31,3 +32,4 @@ export function listStrategies(): string[] {
 
 // --- built-in registrations ---
 registerStrategy("baseline-momentum-vol", (params) => new BaselineStrategy(params));
+registerStrategy("spike-fade", (params) => new SpikeFadeStrategy(params));
