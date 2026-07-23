@@ -20,7 +20,17 @@ import { AlertDispatcher, ConsoleChannel, TelegramChannel, DiscordChannel, type 
 import { DryRunExecutor, OnchainExecutor, type Executor } from "./execution.js";
 import { LiveEngine } from "./engine/live.js";
 import { makeBrokerForceProvider } from "./brokerforce/volatility.js";
-import { readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+async function ensureFileReadable(path: string): Promise<void> {
+  try {
+    await access(path, fsConstants.R_OK);
+  } catch {
+    throw new Error(`Fixture file not accessible: ${path}`);
+  }
+}
 
 function parseFlags(argv: string[]): Map<string, string> {
   const flags = new Map<string, string>();
@@ -54,27 +64,46 @@ function buildExecutor(cfg: BotConfig): Executor {
   return cfg.onchain.liveTrading ? new OnchainExecutor(cfg.onchain) : new DryRunExecutor();
 }
 
-/** Load candles from --fixture, or fetch `count` from Binance. */
+/**
+ * Load candles from --fixture (via `fixtureFlag`), or fetch `count` from
+ * Binance. When the live fetch fails and a fallback fixture is configured
+ * (BACKTEST_FIXTURE_PATH), fall back to it instead of dying — keeps offline
+ * runs working without flags.
+ */
 async function loadCandles(
   flags: Map<string, string>,
   fixtureFlag: string,
   symbol: string,
   interval: BotConfig["interval"],
-  count: number
+  count: number,
+  fallbackFixture: string | null = null
 ): Promise<Candle[]> {
   const fixture = flags.get(fixtureFlag);
   if (fixture) {
+    await ensureFileReadable(fixture);
     const candles = parseFixture(await readFile(fixture, "utf8"));
     console.log(`Loaded ${candles.length} candles from fixture ${fixture}`);
     return candles;
   }
   console.log(`Fetching ${count} ${interval} candles for ${symbol} from Binance…`);
-  const candles = await fetchHistory({ symbol, interval, count });
-  console.log(`Got ${candles.length} candles.`);
-  return candles;
+  try {
+    const candles = await fetchHistory({ symbol, interval, count });
+    console.log(`Got ${candles.length} candles.`);
+    return candles;
+  } catch (err) {
+    if (!fallbackFixture) throw err;
+    console.warn(
+      `Live Binance fetch failed (${err instanceof Error ? err.message : String(err)}). ` +
+        `Falling back to fixture ${fallbackFixture}.`
+    );
+    await ensureFileReadable(fallbackFixture);
+    const candles = parseFixture(await readFile(fallbackFixture, "utf8"));
+    console.log(`Loaded ${candles.length} candles from fixture ${fallbackFixture}`);
+    return candles;
+  }
 }
 
-async function cmdBacktest(flags: Map<string, string>): Promise<void> {
+export async function cmdBacktest(flags: Map<string, string>): Promise<void> {
   const cfg = loadConfig();
   const strategyName = flags.get("strategy") ?? cfg.strategy;
   const strategy = createStrategy(strategyName);
@@ -86,10 +115,12 @@ async function cmdBacktest(flags: Map<string, string>): Promise<void> {
   // open round per symbol, so live frequency will be lower than backtest.
   const stride = Number(flags.get("stride") ?? 1);
 
-  const candles = await loadCandles(flags, "fixture", symbol, cfg.interval, count);
+  const candles = await loadCandles(flags, "fixture", symbol, cfg.interval, count, cfg.fallbackFixturePath);
 
   // Optional cross-asset signal feed (CORE gate): --signal-fixture file, or
   // --signal SYMBOL to fetch it (defaults to cfg.signalSymbol when fetching).
+  // Best-effort: if the signal feed can't be loaded, the backtest still runs
+  // without the gate (same degradation as the live engine) rather than dying.
   let externalProvider;
   const signalSymbol = (flags.get("signal") ?? cfg.signalSymbol ?? "").toUpperCase();
   if (flags.get("signal-fixture")) {
@@ -97,8 +128,15 @@ async function cmdBacktest(flags: Map<string, string>): Promise<void> {
     console.log(`Loaded ${sigCandles.length} signal candles (${signalSymbol || "signal"})`);
     externalProvider = alignedSignalProvider(signalSymbol || "SIGNAL", sigCandles);
   } else if (signalSymbol && !flags.get("fixture")) {
-    const sigCandles = await loadCandles(flags, "signal-fixture", signalSymbol, cfg.interval, count);
-    externalProvider = alignedSignalProvider(signalSymbol, sigCandles);
+    try {
+      const sigCandles = await loadCandles(flags, "signal-fixture", signalSymbol, cfg.interval, count);
+      externalProvider = alignedSignalProvider(signalSymbol, sigCandles);
+    } catch (err) {
+      console.warn(
+        `Signal feed ${signalSymbol} unavailable (${err instanceof Error ? err.message : String(err)}). ` +
+          `Running without the CORE gate.`
+      );
+    }
   }
 
   const { summary, trades } = runBacktest(
@@ -185,7 +223,9 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}
