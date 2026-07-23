@@ -57,6 +57,13 @@ export interface Signal {
   reason: string;
   /** Arbitrary feature snapshot recorded for later win/loss analysis. */
   features: Record<string, number>;
+  /**
+   * Optional per-trade PRDT expiry in minutes. When set, the engine settles
+   * THIS round at the requested horizon instead of the global window — this is
+   * how a strategy expresses a regime-adaptive expiry (e.g. short in hot vol,
+   * longer in calm). Omit to use the configured default window.
+   */
+  expiryMin?: number;
 }
 
 export interface Strategy {

@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { runBacktest, type BacktestConfig } from "./backtest.js";
 import { BaselineStrategy } from "../strategy/baseline.js";
 import type { Candle } from "../feed/binance.js";
+import type { Strategy } from "../strategy/types.js";
 
 /** Build candles from a close-price series (open≈prev close, tight range). */
 function candleSeries(closes: number[]): Candle[] {
@@ -44,6 +45,23 @@ describe("backtest", () => {
     expect(summary.taken).toBeGreaterThan(0);
     expect(summary.wins).toBeGreaterThan(summary.losses);
     expect(summary.winRate).toBeGreaterThan(0.5);
+  });
+
+  it("honors a signal's per-trade expiry (regime-adaptive window)", () => {
+    // Stub strategy that always fires UP with a 1-minute expiry, overriding the
+    // config's 5-bar window. Settlement must land 1 bar out, not 5.
+    const stub: Strategy = {
+      name: "stub",
+      warmup: 2,
+      evaluate: () => ({ direction: "UP", confidence: 1, reason: "x", features: {}, expiryMin: 1 }),
+    };
+    const closes = Array.from({ length: 100 }, (_, i) => 100 + i); // strictly rising
+    const { trades } = runBacktest(stub, candleSeries(closes), { ...cfg, timeframeMin: 5, windowBars: 5 });
+    const taken = trades.filter((t) => t.taken);
+    expect(taken.length).toBeGreaterThan(0);
+    // 1-bar window: settleTime is ~1 candle (60s) after entryTime, not 5.
+    const t0 = taken[0]!;
+    expect(t0.settleTime - t0.entryTime).toBeLessThan(130_000);
   });
 
   it("counterfactuals carry a would-have outcome for skipped rounds", () => {

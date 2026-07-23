@@ -101,6 +101,22 @@ describe("SpikeFadeStrategy", () => {
     expect(sig.reason).toContain("CORE");
   });
 
+  it("does not tag an expiry when adaptive expiry is off (default)", () => {
+    const closes = withUpSpikeAndStall(quietSeries(760), 0.01, 3);
+    const sig = new SpikeFadeStrategy().evaluate(ctx(closes));
+    expect(sig.direction).toBe("DOWN");
+    expect(sig.expiryMin).toBeUndefined();
+  });
+
+  it("tags a per-trade expiry from the vol regime when adaptive expiry is on", () => {
+    const closes = withUpSpikeAndStall(quietSeries(760), 0.01, 3);
+    const sig = new SpikeFadeStrategy({ adaptiveExpiry: true }).evaluate(ctx(closes));
+    expect(sig.direction).toBe("DOWN");
+    expect(sig.expiryMin).toBeDefined();
+    expect([5, 15, 25]).toContain(sig.expiryMin);
+    expect(sig.reason).toContain("expiry=");
+  });
+
   it("allows the UP fade when CORE has turned up off its low", () => {
     const base = quietSeries(200);
     const last = base[base.length - 1]!;
