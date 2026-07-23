@@ -1,0 +1,24 @@
+-- Pool on-chain contract address -------------------------------------------
+--
+-- Holds the pool's on-chain contract address (the DEX pool/pair contract, not
+-- the two token addresses -- those already ride on RawPoolData as
+-- base/quoteTokenAddress for identity verification). Nullable: existing rows
+-- predate the column and sources don't always expose the field, so this
+-- backfills organically as pools are re-ingested (the upsert fills it in on
+-- the next run via ON CONFLICT ... SET pool_address = EXCLUDED.pool_address).
+--
+-- This is the join key a future Uniswap-v3 subgraph enrichment will use: the
+-- subgraph is keyed by pool contract address, and pairing it back to our rows
+-- (to layer on pair popularity + tick-level active liquidity, the swap_count_7d
+-- / unique_lp_count / active_liquidity_distribution fields that need subgraph
+-- data) requires that address to be stored. Capturing it now is the
+-- foundation; the enrichment itself is separate, later work.
+--
+-- Deliberately NOT touched here: the pools uniqueness key
+-- (pools_pair_dex_chain_fee_unique from migration 002) and the `chain` column
+-- semantics stay exactly as they are -- pool_address is an added attribute for
+-- a future join, not a new identity key. (See 002's header: contract address
+-- would be the truer identity, but reshaping the unique key is out of scope
+-- and would need a data backfill first.)
+
+ALTER TABLE pools ADD COLUMN IF NOT EXISTS pool_address TEXT;

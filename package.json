@@ -1,0 +1,40 @@
+{
+  "name": "brokerforce",
+  "private": true,
+  "version": "0.0.0",
+  "description": "BrokerForce — a protocol-agnostic Liquidity Intelligence Platform. See docs/Vision.md.",
+  "license": "AGPL-3.0-or-later",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:web": "npm run dev --workspace=apps/web",
+    "dev:api": "npm run dev --workspace=apps/api",
+    "migrate": "npm run migrate --workspace=packages/db",
+    "ingest": "npm run ingest --workspace=apps/ingestion",
+    "ingest-pools": "npm run ingest-pools --workspace=apps/ingestion",
+    "enrich-pools-subgraph": "npm run enrich-pools-subgraph --workspace=apps/ingestion",
+    "ingest-sentiment": "npm run ingest-sentiment --workspace=apps/ingestion",
+    "generate-pairs": "npm run generate-pairs --workspace=apps/pair-engine",
+    "compute-metrics": "npm run compute-metrics --workspace=apps/pair-engine",
+    "compute-ort": "npm run compute-ort --workspace=apps/ort-engine",
+    "mark-active": "npm run mark-active --workspace=apps/ort-engine --",
+    "build": "npm run build --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present"
+  },
+  "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "eslint": "^9.0.0",
+    "eslint-config-prettier": "^9.1.0",
+    "prettier": "^3.3.0",
+    "typescript": "^5.5.0",
+    "typescript-eslint": "^8.0.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
