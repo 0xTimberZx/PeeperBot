@@ -34,6 +34,14 @@ export interface BacktestConfig {
    * statistical significance. Defaults to overlapping (false) for continuity.
    */
   noOverlap?: boolean;
+  /**
+   * Restrict trading to one side. "UP" = buy side only (only take long/UP
+   * calls — for spike-fade that's fading DOWN-spikes to catch the bounce);
+   * "DOWN" = sell side only. The other side's signals become not-taken
+   * counterfactuals. Undefined trades both sides. Motivation: in a trending
+   * market one side carries a drift tailwind the other fights.
+   */
+  side?: Direction;
 }
 
 export interface TradeRecord {
@@ -66,6 +74,13 @@ export interface BacktestSummary {
   winRate: number; // wins / (wins+losses)
   netPnlUnits: number; // sum of taken PnL, in stake units
   roiPerTrade: number; // netPnlUnits / taken
+  // Taken trades split by side (the buy-side vs sell-side edge check)
+  upTaken: number;
+  upWinRate: number;
+  upRoiPerTrade: number;
+  downTaken: number;
+  downWinRate: number;
+  downRoiPerTrade: number;
   // Counterfactuals (skipped rounds)
   skipped: number;
   skippedWouldWin: number;
@@ -154,6 +169,9 @@ export function runBacktest(
     if (settle === undefined) continue; // not enough forward bars for this expiry
 
     let taken = signal.direction !== "NONE" && signal.confidence >= cfg.confidenceFloor;
+    // Side filter: only trade the configured side (buy/sell). Applied BEFORE
+    // the no-overlap gate so a filtered-out signal doesn't consume the slot.
+    if (cfg.side && signal.direction !== cfg.side) taken = false;
     // Live-faithful mode: block a new trade while a prior round is still open.
     if (cfg.noOverlap && taken && i < openUntil) taken = false;
     if (cfg.noOverlap && taken) openUntil = i + windowBars;
@@ -205,6 +223,21 @@ export function summarize(strategyName: string, cfg: BacktestConfig, trades: Tra
   const skLoss = skipped.filter((t) => t.outcome === "LOSS").length;
   const skDecided = skWin + skLoss;
 
+  // Split taken trades by side to expose an asymmetric (buy- vs sell-side) edge.
+  const sideStats = (dir: Direction) => {
+    const side = taken.filter((t) => t.direction === dir);
+    const w = side.filter((t) => t.outcome === "WIN").length;
+    const l = side.filter((t) => t.outcome === "LOSS").length;
+    const pnl = side.reduce((s, t) => s + t.pnl, 0);
+    return {
+      taken: side.length,
+      winRate: w + l === 0 ? 0 : w / (w + l),
+      roiPerTrade: side.length === 0 ? 0 : pnl / side.length,
+    };
+  };
+  const up = sideStats("UP");
+  const down = sideStats("DOWN");
+
   return {
     strategy: strategyName,
     symbol: cfg.symbol,
@@ -219,6 +252,12 @@ export function summarize(strategyName: string, cfg: BacktestConfig, trades: Tra
     winRate: decided === 0 ? 0 : wins / decided,
     netPnlUnits: netPnl,
     roiPerTrade: taken.length === 0 ? 0 : netPnl / taken.length,
+    upTaken: up.taken,
+    upWinRate: up.winRate,
+    upRoiPerTrade: up.roiPerTrade,
+    downTaken: down.taken,
+    downWinRate: down.winRate,
+    downRoiPerTrade: down.roiPerTrade,
     skipped: skipped.length,
     skippedWouldWin: skWin,
     skippedWouldLose: skLoss,
