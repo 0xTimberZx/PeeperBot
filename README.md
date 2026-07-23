@@ -1,8 +1,44 @@
-# BrokerForce
+# PeeperBot
 
-A protocol-agnostic Liquidity Intelligence Platform that helps liquidity providers discover, evaluate, and optimize concentrated liquidity opportunities across DeFi.
+A selective **trading-signal + backtest engine** for the
+[PRDT Finance **Pro**](https://prdt.finance/pro) prediction market. PeeperBot
+watches the Binance price feed PRDT settles on and, on a set timeframe, either
+**alerts** you to a high-confidence opportunity or (once you deliberately enable
+it) **places the trade** — recording every decision, taken or not, so real edge
+is measurable before any funds are risked.
 
-This repository is built **docs-first**. Before reading any code, read:
+> **The bot lives in [`apps/prdt-bot`](apps/prdt-bot/README.md) — start there.**
+> It covers the strategy interface (drop in your own formula), the no-lookahead
+> backtester, live signal loop, alert channels, the counterfactual "every
+> opportunity analyzed" ledger, and the deliberately-gated live-trading path.
+
+Quick start:
+
+```bash
+npm install
+npm run bot:backtest -- --symbol BTCUSDT --candles 5000   # backtest on real candles
+npm run bot:run                                            # live signal loop (dry-run)
+npm run bot:report                                         # performance + counterfactual report
+```
+
+**On "95/100":** PRDT Pro pays a fixed ~1.9×, so breakeven is ~52.6% and a
+guaranteed 95% win rate isn't attainable in a fair market. PeeperBot is built for
+*precision through selectivity* — staying out of coin-flips and proving edge on
+data. See `apps/prdt-bot/README.md` for the full, honest framing.
+
+---
+
+## Inherited monorepo scaffold (BrokerForce)
+
+PeeperBot is built on the shared TypeScript monorepo scaffold below (npm
+workspaces, shared `packages/db` · `packages/stats` · `packages/types`, CI). The
+BrokerForce data apps (`apps/api`, `apps/web`, `apps/ingestion`,
+`apps/pair-engine`, `apps/ort-engine`) are the platform PeeperBot **reads from,
+read-only**, for its volatility-vs-norm overlay — nothing in them is modified by
+the bot. The remainder of this document is that scaffold's original
+documentation, retained as the reference for those shared pieces.
+
+This scaffold is built **docs-first**. Before reading any code, read:
 
 1. [`docs/Vision.md`](docs/Vision.md) — what BrokerForce is and why it exists.
 2. [`docs/Product_Principles.md`](docs/Product_Principles.md) — the rules every feature is held to, including the one that matters most: nothing gets coded until it can be explained in one sentence.
