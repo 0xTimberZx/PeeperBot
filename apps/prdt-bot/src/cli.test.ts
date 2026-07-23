@@ -20,6 +20,8 @@ vi.mock("./engine/backtest.js", () => ({
       losses: 0,
       winRate: 1,
       netPnlUnits: 0,
+      roiPerTrade: 0.9,
+      breakevenWinRate: 0.5263,
       skippedWouldWin: 0,
       skippedWouldLose: 0,
       pushes: 0,
@@ -60,7 +62,7 @@ vi.mock("node:fs/promises", async () => {
   };
 });
 
-import { cmdBacktest } from "./cli.js";
+import { cmdBacktest, cmdSweep } from "./cli.js";
 import { fetchHistory } from "./feed/binance.js";
 import { runBacktest } from "./engine/backtest.js";
 import { access, readFile } from "node:fs/promises";
@@ -97,5 +99,20 @@ describe("CLI backtest", () => {
     expect(mockedAccess).toHaveBeenCalledWith("./explicit-candles.json", expect.any(Number));
     expect(mockedReadFile).toHaveBeenCalledWith("./explicit-candles.json", "utf8");
     expect(mockedRunBacktest).toHaveBeenCalled();
+  });
+});
+
+describe("CLI sweep", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("runs one backtest per expiry window", async () => {
+    const flags = new Map<string, string>([
+      ["fixture", "./candles.json"],
+      ["windows", "5,15,30"],
+    ]);
+    await cmdSweep(flags);
+    // No signal fetch when a fixture is supplied; one backtest per window.
+    expect(mockedFetchHistory).not.toHaveBeenCalled();
+    expect(mockedRunBacktest).toHaveBeenCalledTimes(3);
   });
 });
