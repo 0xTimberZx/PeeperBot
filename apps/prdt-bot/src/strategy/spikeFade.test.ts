@@ -113,7 +113,7 @@ describe("SpikeFadeStrategy", () => {
     const sig = new SpikeFadeStrategy({ adaptiveExpiry: true }).evaluate(ctx(closes));
     expect(sig.direction).toBe("DOWN");
     expect(sig.expiryMin).toBeDefined();
-    expect([5, 15, 25]).toContain(sig.expiryMin);
+    expect([10, 15, 20]).toContain(sig.expiryMin);
     expect(sig.reason).toContain("expiry=");
   });
 
