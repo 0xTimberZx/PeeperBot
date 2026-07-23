@@ -47,6 +47,31 @@ describe("backtest", () => {
     expect(summary.winRate).toBeGreaterThan(0.5);
   });
 
+  it("side filter takes only the configured direction", () => {
+    // Strategy alternates UP/DOWN each bar; with side=UP only UP is taken.
+    let n = 0;
+    const alt: Strategy = {
+      name: "alt",
+      warmup: 2,
+      evaluate: () => ({ direction: n++ % 2 === 0 ? "UP" : "DOWN", confidence: 1, reason: "x", features: {} }),
+    };
+    const closes = Array.from({ length: 80 }, (_, i) => 100 + (i % 2));
+    const { summary, trades } = runBacktest(alt, candleSeries(closes), {
+      ...cfg,
+      side: "UP",
+    });
+    expect(trades.filter((t) => t.taken).every((t) => t.direction === "UP")).toBe(true);
+    expect(summary.upTaken).toBeGreaterThan(0);
+    expect(summary.downTaken).toBe(0);
+  });
+
+  it("reports by-side win rates in the summary", () => {
+    const closes = Array.from({ length: 300 }, (_, i) => 100 + i * 0.4 + (i % 2) * 0.15);
+    const { summary } = runBacktest(new BaselineStrategy(), candleSeries(closes), cfg);
+    // both-sided run populates both buckets; their taken counts sum to total
+    expect(summary.upTaken + summary.downTaken).toBe(summary.taken);
+  });
+
   it("no-overlap mode spaces taken trades at least one window apart", () => {
     // Strategy fires UP every bar; with a 5-bar window and noOverlap, taken
     // trades must be >= 5 bars apart (a prior round must settle first).

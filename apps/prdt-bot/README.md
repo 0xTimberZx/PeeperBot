@@ -136,6 +136,20 @@ per-regime view is idealized; this no-lookahead sweep is the arbiter):
 npm run sweep --workspace=apps/prdt-bot -- --windows 5,10,15,20,30 --signal COREUSDT --candles 20000
 ```
 
+### Buy-side vs sell-side
+
+Every `backtest` prints a **UP-vs-DOWN breakdown** — in a trending market one
+side often carries a drift tailwind the other fights, so the combined win rate
+can hide a real edge on one side. To trade (and backtest) a single side, set
+`TRADE_SIDE=UP` (buy/long only) or `TRADE_SIDE=DOWN`, or pass `--side UP` /
+`--side DOWN` to `backtest`/`sweep`:
+
+```bash
+# does the buy side clear breakeven on its own, on independent trades?
+npm run sweep --workspace=apps/prdt-bot -- --windows 10,15,20 --candles 60000 \
+  --signal COREUSDT --no-overlap --side UP
+```
+
 ### Findings so far (BTC, ~20k 1m candles / ~2 weeks)
 
 - **15-minute expiry is the winner** under honest no-lookahead entries: 58% win /
