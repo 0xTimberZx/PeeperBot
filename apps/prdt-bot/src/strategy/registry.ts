@@ -30,6 +30,36 @@ export function listStrategies(): string[] {
   return [...registry.keys()];
 }
 
+// Read spike-fade knobs that are exposed via env (so they're tunable without
+// code edits). Only defined keys override the strategy defaults.
+function spikeFadeEnvParams(): Record<string, unknown> {
+  const p: Record<string, unknown> = {};
+  const num = (name: string) => {
+    const raw = process.env[name];
+    if (raw !== undefined && raw.trim() !== "" && !Number.isNaN(Number(raw))) return Number(raw);
+    return undefined;
+  };
+  if (process.env.ADAPTIVE_EXPIRY !== undefined) {
+    p.adaptiveExpiry = process.env.ADAPTIVE_EXPIRY.trim().toLowerCase() === "true";
+  }
+  const high = num("EXPIRY_HIGH_VOL");
+  const mid = num("EXPIRY_MID_VOL");
+  const low = num("EXPIRY_LOW_VOL");
+  const minZ = num("SPIKE_MIN_Z");
+  const stall = num("SPIKE_STALL_BARS");
+  const maxVol = num("SPIKE_MAX_VOL_RATIO");
+  if (high !== undefined) p.expiryHighVol = high;
+  if (mid !== undefined) p.expiryMidVol = mid;
+  if (low !== undefined) p.expiryLowVol = low;
+  if (minZ !== undefined) p.minSpikeZ = minZ;
+  if (stall !== undefined) p.stallBars = stall;
+  if (maxVol !== undefined) p.maxVolRatio = maxVol;
+  return p;
+}
+
 // --- built-in registrations ---
 registerStrategy("baseline-momentum-vol", (params) => new BaselineStrategy(params));
-registerStrategy("spike-fade", (params) => new SpikeFadeStrategy(params));
+registerStrategy(
+  "spike-fade",
+  (params) => new SpikeFadeStrategy({ ...spikeFadeEnvParams(), ...params })
+);

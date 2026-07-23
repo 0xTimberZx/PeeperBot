@@ -136,6 +136,16 @@ per-regime view is idealized; this no-lookahead sweep is the arbiter):
 npm run sweep --workspace=apps/prdt-bot -- --windows 5,10,15,20,30 --signal COREUSDT --candles 20000
 ```
 
+### Regime-adaptive expiry (opt-in)
+
+The profiler shows fades resolve fastest in high-vol tape and slower in calm
+tape, so the best PRDT expiry depends on the regime. Set `ADAPTIVE_EXPIRY=true`
+and the strategy tags each trade with a per-round expiry chosen from the current
+volatility regime (`EXPIRY_HIGH_VOL` / `EXPIRY_MID_VOL` / `EXPIRY_LOW_VOL`,
+default 5 / 15 / 25 min). The backtester and live engine both honor the
+per-trade window. It's **off by default** — turn it on only once a `sweep`
+confirms the per-window win-rates justify it, then backtest again to compare.
+
 ## Plugging in your own formula
 
 The whole engine is strategy-agnostic. To backtest your formula:
