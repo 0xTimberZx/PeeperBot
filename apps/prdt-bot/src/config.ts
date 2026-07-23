@@ -65,10 +65,11 @@ export interface BotConfig {
 }
 
 export function loadConfig(overrides: Partial<BotConfig> = {}): BotConfig {
-  // Defaults reflect the current play: trade BTC on PRDT Pro 30-min rounds,
-  // spike-fade strategy, CORE (not offered on PRDT) watched as the market-
-  // health signal. All overridable via env.
-  const timeframeMin = num("PRDT_TIMEFRAME_MIN", 30);
+  // Defaults reflect the current play: trade BTC on PRDT Pro rounds, spike-fade
+  // strategy, CORE (not offered on PRDT) watched as the market-health signal.
+  // 15-min expiry is the sweep-proven winner on real BTC data (58% win / +10.2%
+  // ROI-per-trade vs 52.6% breakeven; 5m loses, 30m is +5.9%). All overridable.
+  const timeframeMin = num("PRDT_TIMEFRAME_MIN", 15);
   const interval = intervalForTimeframe(timeframeMin);
   const intervalMin = 1; // interval is always 1m today; kept explicit for clarity
   const windowBars = Math.max(1, Math.round(timeframeMin / intervalMin));

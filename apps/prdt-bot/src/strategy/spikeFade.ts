@@ -72,10 +72,15 @@ export const DEFAULT_SPIKE_FADE_PARAMS: SpikeFadeParams = {
   maxVolRatio: 3.0,
   gateLookback: 240,
   gateLag: 15,
+  // Adaptive expiry stays OFF by default: on real BTC data a FLAT 15-min window
+  // (58% win / +10.2% ROI-per-trade) beat the adaptive mapping (55.7% / +5.9%),
+  // because idealized-apex profiling overstated short windows — real entries at
+  // 5m lose. Defaults avoid the sub-breakeven 5m and cluster on the proven
+  // 10–20m band, so enabling adaptive can't route into the losing window.
   adaptiveExpiry: false,
-  expiryHighVol: 5,
+  expiryHighVol: 10,
   expiryMidVol: 15,
-  expiryLowVol: 25,
+  expiryLowVol: 20,
   regimeLookback: 600,
   regimeLowPct: 0.33,
   regimeHighPct: 0.66,

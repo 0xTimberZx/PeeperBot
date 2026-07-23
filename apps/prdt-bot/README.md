@@ -136,15 +136,28 @@ per-regime view is idealized; this no-lookahead sweep is the arbiter):
 npm run sweep --workspace=apps/prdt-bot -- --windows 5,10,15,20,30 --signal COREUSDT --candles 20000
 ```
 
-### Regime-adaptive expiry (opt-in)
+### Findings so far (BTC, ~20k 1m candles / ~2 weeks)
 
-The profiler shows fades resolve fastest in high-vol tape and slower in calm
-tape, so the best PRDT expiry depends on the regime. Set `ADAPTIVE_EXPIRY=true`
-and the strategy tags each trade with a per-round expiry chosen from the current
-volatility regime (`EXPIRY_HIGH_VOL` / `EXPIRY_MID_VOL` / `EXPIRY_LOW_VOL`,
-default 5 / 15 / 25 min). The backtester and live engine both honor the
-per-trade window. It's **off by default** — turn it on only once a `sweep`
-confirms the per-window win-rates justify it, then backtest again to compare.
+- **15-minute expiry is the winner** under honest no-lookahead entries: 58% win /
+  +10.2% ROI-per-trade vs the 52.6% breakeven. 5m *loses* (−1.1%), 30m is +5.9%.
+- **The profiler oversold short windows.** Its idealized apex entry made 5m look
+  best (67–70%); real entry-timing error kills 5m. The `sweep` is the arbiter,
+  not `profile`.
+- **Confidence is poorly calibrated** — win rate doesn't rise with the confidence
+  score, so the *filters* (spike + stall + guards + CORE gate) carry the edge.
+- **Selectivity works**: skipped rounds resolve ~50/50 (coin-flips) vs 55–58% on
+  taken trades.
+- Caveat: one ~2-week sample with overlapping trades — **confirm out-of-sample**
+  (more candles / different periods) before trusting it with money.
+
+### Regime-adaptive expiry (opt-in, currently *not* recommended)
+
+Set `ADAPTIVE_EXPIRY=true` to tag each trade with a per-round expiry from the
+current volatility regime (`EXPIRY_HIGH_VOL` / `EXPIRY_MID_VOL` /
+`EXPIRY_LOW_VOL`, default **10 / 15 / 20** min — the 5m footgun is removed). The
+backtester and live engine both honor the per-trade window. **On the data so
+far, flat 15m beat adaptive**, so it's off by default; only enable it if a
+regime-split test proves a regime genuinely prefers a different window.
 
 ## Plugging in your own formula
 
