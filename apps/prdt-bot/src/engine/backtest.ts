@@ -25,6 +25,15 @@ export interface BacktestConfig {
   /** Sample an entry every N bars (1 = every bar). Keeps big runs tractable. */
   stride: number;
   payout: number;
+  /**
+   * When true, model the live constraint: only ONE open round at a time. A
+   * signal that fires while a prior taken round is still unsettled is recorded
+   * as a (not-taken) counterfactual instead of a trade. This matches what the
+   * live engine actually does and de-correlates the taken trades — overlapping
+   * stride-1 entries otherwise inflate both the trade count and the apparent
+   * statistical significance. Defaults to overlapping (false) for continuity.
+   */
+  noOverlap?: boolean;
 }
 
 export interface TradeRecord {
@@ -112,6 +121,9 @@ export function runBacktest(
 ): { summary: BacktestSummary; trades: TradeRecord[] } {
   const trades: TradeRecord[] = [];
   const stride = Math.max(1, cfg.stride);
+  // For no-overlap mode: bar index at which the currently-open round settles.
+  // A new entry before this is blocked (a position is still live).
+  let openUntil = -1;
   // Minutes per candle (interval is 1m today; derived so it stays correct if
   // that changes). Used to convert a signal's per-trade expiry into bars.
   const intervalMin = cfg.windowBars > 0 ? cfg.timeframeMin / cfg.windowBars : 1;
@@ -141,7 +153,10 @@ export function runBacktest(
     const settle = candles[i + windowBars];
     if (settle === undefined) continue; // not enough forward bars for this expiry
 
-    const taken = signal.direction !== "NONE" && signal.confidence >= cfg.confidenceFloor;
+    let taken = signal.direction !== "NONE" && signal.confidence >= cfg.confidenceFloor;
+    // Live-faithful mode: block a new trade while a prior round is still open.
+    if (cfg.noOverlap && taken && i < openUntil) taken = false;
+    if (cfg.noOverlap && taken) openUntil = i + windowBars;
 
     // For scoring a skipped round we still need a direction to evaluate the
     // counterfactual. Use the strategy's leaning direction if it gave one;
