@@ -1,0 +1,35 @@
+name: CI
+
+# Mirrors docs/Product_Principles.md §4: nothing merges without traceable, working
+# changes. This runs lint, typecheck, and build across every workspace — it does not
+# run tests yet since no test suites exist for a pure scaffold; add a test job here
+# once specs start landing real implementations with real test coverage.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build

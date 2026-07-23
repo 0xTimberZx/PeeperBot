@@ -1,0 +1,26 @@
+{
+  "name": "@brokerforce/pair-engine",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate-pairs": "tsx src/generate-pairs.ts",
+    "compute-metrics": "tsx src/compute-metrics.ts",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src --ext .ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@brokerforce/db": "*",
+    "@brokerforce/stats": "*",
+    "@brokerforce/types": "*",
+    "dotenv": "^16.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "tsx": "^4.16.0",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0"
+  }
+}

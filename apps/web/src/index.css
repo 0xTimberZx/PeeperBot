@@ -1,0 +1,15 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-bg-deep text-ink font-body;
+  }
+  /* Tabular figures everywhere numbers actually compare against each other --
+     a correlation column that doesn't align digit-for-digit undermines the
+     "precision" the mono face is there to signal in the first place. */
+  .font-mono {
+    font-feature-settings: "tnum" 1;
+  }
+}

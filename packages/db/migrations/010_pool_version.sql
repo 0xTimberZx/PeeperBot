@@ -1,0 +1,24 @@
+-- Pool AMM version ----------------------------------------------------------
+--
+-- Holds the pool's AMM version -- "v2" | "v3" | "v4" -- when the source lets us
+-- identify it (DexScreener labels like ["v3"], GeckoTerminal dex ids like
+-- "uniswap_v3"), NULL otherwise. This is version IDENTITY: it exists so the
+-- concentrated-liquidity (v3) cohort is queryable, which today it isn't --
+-- DexScreener, the dominant source, reports a generic dex="uniswap" with no
+-- version, so every real v2/v3/v4 pool collapses into one undifferentiated
+-- bucket. Capturing the version separates them without any new API calls (it's
+-- parsed from fields we already receive).
+--
+-- Nullable, and backfills organically: the upsert sets it on the next
+-- re-ingestion via ON CONFLICT ... SET pool_version = EXCLUDED.pool_version,
+-- so existing rows (which predate the column) fill in as pools are re-polled.
+--
+-- Deliberately NOT touched here (deferred, see specs/011): the pools uniqueness
+-- key (pools_pair_dex_chain_fee_unique from migration 002) and the `fee_tier`
+-- column stay exactly as they are. pool_version is an added attribute for
+-- version identity, NOT a new identity key -- reshaping the unique key to fold
+-- version/address in (and the data backfill that would require), deriving the
+-- true per-version fee tiers, and making fee_tier nullable are separate,
+-- later work.
+
+ALTER TABLE pools ADD COLUMN IF NOT EXISTS pool_version TEXT;
