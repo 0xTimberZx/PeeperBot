@@ -56,6 +56,9 @@ npm run backtest --workspace=apps/prdt-bot -- --symbol BTCUSDT --candles 5000
 # Or backtest offline against a saved fixture (no network):
 npm run backtest --workspace=apps/prdt-bot -- --fixture ./candles.json
 
+# Or configure a fallback fixture path and auto-fall back when Binance is unavailable:
+BACKTEST_FIXTURE_PATH=./candles.json npm run backtest --workspace=apps/prdt-bot -- --symbol BTCUSDT --candles 5000
+
 # Run the live signal loop (dry-run; console alerts):
 npm run run-live --workspace=apps/prdt-bot
 

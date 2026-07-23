@@ -59,6 +59,7 @@ export interface BotConfig {
     extremeZ: number; // |z| above which volatility counts as "extreme vs norm"
   };
   onchain: OnchainConfig;
+  fallbackFixturePath: string | null;
 }
 
 export function loadConfig(overrides: Partial<BotConfig> = {}): BotConfig {
@@ -99,6 +100,7 @@ export function loadConfig(overrides: Partial<BotConfig> = {}): BotConfig {
       maxStakePerTrade: num("MAX_STAKE_PER_TRADE", 5),
       maxStakePerDay: num("MAX_STAKE_PER_DAY", 25),
     },
+    fallbackFixturePath: optStr("BACKTEST_FIXTURE_PATH"),
     ...overrides,
   };
   return cfg;

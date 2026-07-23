@@ -19,7 +19,17 @@ import { AlertDispatcher, ConsoleChannel, TelegramChannel, DiscordChannel, type 
 import { DryRunExecutor, OnchainExecutor, type Executor } from "./execution.js";
 import { LiveEngine } from "./engine/live.js";
 import { makeBrokerForceProvider } from "./brokerforce/volatility.js";
-import { readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+async function ensureFileReadable(path: string): Promise<void> {
+  try {
+    await access(path, fsConstants.R_OK);
+  } catch {
+    throw new Error(`Fixture file not accessible: ${path}`);
+  }
+}
 
 function parseFlags(argv: string[]): Map<string, string> {
   const flags = new Map<string, string>();
@@ -53,7 +63,7 @@ function buildExecutor(cfg: BotConfig): Executor {
   return cfg.onchain.liveTrading ? new OnchainExecutor(cfg.onchain) : new DryRunExecutor();
 }
 
-async function cmdBacktest(flags: Map<string, string>): Promise<void> {
+export async function cmdBacktest(flags: Map<string, string>): Promise<void> {
   const cfg = loadConfig();
   const strategyName = flags.get("strategy") ?? cfg.strategy;
   const strategy = createStrategy(strategyName);
@@ -62,14 +72,32 @@ async function cmdBacktest(flags: Map<string, string>): Promise<void> {
   const stride = Number(flags.get("stride") ?? cfg.windowBars); // non-overlapping by default
 
   let candles: Candle[];
-  const fixture = flags.get("fixture");
-  if (fixture) {
-    candles = parseFixture(await readFile(fixture, "utf8"));
-    console.log(`Loaded ${candles.length} candles from fixture ${fixture}`);
+  const flagFixture = flags.get("fixture");
+  const fallbackFixture = flagFixture ?? cfg.fallbackFixturePath;
+
+  if (flagFixture) {
+    await ensureFileReadable(flagFixture);
+    candles = parseFixture(await readFile(flagFixture, "utf8"));
+    console.log(`Loaded ${candles.length} candles from fixture ${flagFixture}`);
   } else {
     console.log(`Fetching ${count} ${cfg.interval} candles for ${symbol} from Binance…`);
-    candles = await fetchHistory({ symbol, interval: cfg.interval, count });
-    console.log(`Got ${candles.length} candles.`);
+    try {
+      candles = await fetchHistory({ symbol, interval: cfg.interval, count });
+      console.log(`Got ${candles.length} candles.`);
+    } catch (err) {
+      if (fallbackFixture) {
+        console.warn(
+          `Live Binance fetch failed (${err instanceof Error ? err.message : String(err)}). ` +
+            `Falling back to fixture ${fallbackFixture}.
+        `
+        );
+        await ensureFileReadable(fallbackFixture);
+        candles = parseFixture(await readFile(fallbackFixture, "utf8"));
+        console.log(`Loaded ${candles.length} candles from fixture ${fallbackFixture}`);
+      } else {
+        throw err;
+      }
+    }
   }
 
   const { summary, trades } = runBacktest(strategy, candles, {
@@ -134,7 +162,9 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}
