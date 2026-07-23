@@ -66,6 +66,26 @@ npm run run-live --workspace=apps/prdt-bot
 npm run report --workspace=apps/prdt-bot
 ```
 
+## Price feed (Binance geo-block / HTTP 451)
+
+PRDT settles on the Binance feed, so Binance is the default source — but
+**Binance.com returns HTTP 451 from US-based clouds** (GitHub Codespaces, many
+CI runners). The feed is therefore **multi-source with automatic fallback**: it
+tries `FEED_SOURCE`, then each of `FEED_FALLBACKS` in order, normalizing OKX and
+Bybit klines to the same shape. All three carry BTC and CORE, and majors agree
+to the cent across venues, so a fallback is a faithful stand-in.
+
+```bash
+# defaults — nothing to do if Binance is reachable:
+FEED_SOURCE=binance
+FEED_FALLBACKS=okx,bybit
+# on a US Codespace where Binance 451s, you can also make OKX primary:
+FEED_SOURCE=okx
+```
+
+If every source fails it throws `all feed sources failed — …`; set
+`BACKTEST_FIXTURE_PATH` (or pass `--fixture`) to run fully offline.
+
 ## Configuration
 
 All via env / `.env` — see [`.env.example`](./.env.example) for the full list.
