@@ -129,6 +129,13 @@ Then backtest with the CORE feed aligned (strictly no-lookahead on both series):
 npm run backtest --workspace=apps/prdt-bot -- --symbol BTCUSDT --signal COREUSDT --candles 20000
 ```
 
+To decide the **expiry window** from data, sweep several at once (the profiler's
+per-regime view is idealized; this no-lookahead sweep is the arbiter):
+
+```bash
+npm run sweep --workspace=apps/prdt-bot -- --windows 5,10,15,20,30 --signal COREUSDT --candles 20000
+```
+
 ## Plugging in your own formula
 
 The whole engine is strategy-agnostic. To backtest your formula:

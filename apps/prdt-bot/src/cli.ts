@@ -11,7 +11,7 @@
 import { loadConfig, type BotConfig } from "./config.js";
 import { createStrategy, listStrategies } from "./strategy/registry.js";
 import { fetchHistory, parseFixture, type Candle } from "./feed/binance.js";
-import { runBacktest, alignedSignalProvider } from "./engine/backtest.js";
+import { runBacktest, alignedSignalProvider, type ExternalContextProvider } from "./engine/backtest.js";
 import { formatBacktest } from "./analysis/backtestFormat.js";
 import { detectAndProfile, formatProfile } from "./analysis/spikeProfile.js";
 import { buildReport, formatReport } from "./analysis/report.js";
@@ -103,6 +103,38 @@ async function loadCandles(
   }
 }
 
+/**
+ * Build the optional cross-asset signal provider (CORE gate) from flags/config.
+ * --signal-fixture <file> uses a local file; otherwise --signal SYMBOL (or
+ * cfg.signalSymbol) fetches it. Best-effort: returns undefined if it can't be
+ * loaded, so callers run without the gate rather than dying (same degradation
+ * as the live engine).
+ */
+async function buildSignalProvider(
+  flags: Map<string, string>,
+  cfg: BotConfig,
+  count: number
+): Promise<ExternalContextProvider | undefined> {
+  const signalSymbol = (flags.get("signal") ?? cfg.signalSymbol ?? "").toUpperCase();
+  if (flags.get("signal-fixture")) {
+    const sigCandles = parseFixture(await readFile(flags.get("signal-fixture")!, "utf8"));
+    console.log(`Loaded ${sigCandles.length} signal candles (${signalSymbol || "signal"})`);
+    return alignedSignalProvider(signalSymbol || "SIGNAL", sigCandles);
+  }
+  if (signalSymbol && !flags.get("fixture")) {
+    try {
+      const sigCandles = await loadCandles(flags, "signal-fixture", signalSymbol, cfg.interval, count);
+      return alignedSignalProvider(signalSymbol, sigCandles);
+    } catch (err) {
+      console.warn(
+        `Signal feed ${signalSymbol} unavailable (${err instanceof Error ? err.message : String(err)}). ` +
+          `Running without the CORE gate.`
+      );
+    }
+  }
+  return undefined;
+}
+
 export async function cmdBacktest(flags: Map<string, string>): Promise<void> {
   const cfg = loadConfig();
   const strategyName = flags.get("strategy") ?? cfg.strategy;
@@ -116,28 +148,7 @@ export async function cmdBacktest(flags: Map<string, string>): Promise<void> {
   const stride = Number(flags.get("stride") ?? 1);
 
   const candles = await loadCandles(flags, "fixture", symbol, cfg.interval, count, cfg.fallbackFixturePath);
-
-  // Optional cross-asset signal feed (CORE gate): --signal-fixture file, or
-  // --signal SYMBOL to fetch it (defaults to cfg.signalSymbol when fetching).
-  // Best-effort: if the signal feed can't be loaded, the backtest still runs
-  // without the gate (same degradation as the live engine) rather than dying.
-  let externalProvider;
-  const signalSymbol = (flags.get("signal") ?? cfg.signalSymbol ?? "").toUpperCase();
-  if (flags.get("signal-fixture")) {
-    const sigCandles = parseFixture(await readFile(flags.get("signal-fixture")!, "utf8"));
-    console.log(`Loaded ${sigCandles.length} signal candles (${signalSymbol || "signal"})`);
-    externalProvider = alignedSignalProvider(signalSymbol || "SIGNAL", sigCandles);
-  } else if (signalSymbol && !flags.get("fixture")) {
-    try {
-      const sigCandles = await loadCandles(flags, "signal-fixture", signalSymbol, cfg.interval, count);
-      externalProvider = alignedSignalProvider(signalSymbol, sigCandles);
-    } catch (err) {
-      console.warn(
-        `Signal feed ${signalSymbol} unavailable (${err instanceof Error ? err.message : String(err)}). ` +
-          `Running without the CORE gate.`
-      );
-    }
-  }
+  const externalProvider = await buildSignalProvider(flags, cfg, count);
 
   const { summary, trades } = runBacktest(
     strategy,
@@ -153,6 +164,67 @@ export async function cmdBacktest(flags: Map<string, string>): Promise<void> {
     externalProvider
   );
   console.log("\n" + formatBacktest(summary, trades));
+}
+
+/**
+ * Sweep the strategy across several PRDT expiry windows on the SAME data, so
+ * you can see which window pays best under honest no-lookahead entries — the
+ * arbiter for the profiler's idealized per-regime view. `--windows 5,10,15,30`.
+ */
+export async function cmdSweep(flags: Map<string, string>): Promise<void> {
+  const cfg = loadConfig();
+  const strategy = createStrategy(flags.get("strategy") ?? cfg.strategy);
+  const symbol = (flags.get("symbol") ?? cfg.symbols[0] ?? "BTCUSDT").toUpperCase();
+  const count = Number(flags.get("candles") ?? 20000);
+  const stride = Number(flags.get("stride") ?? 1);
+  const windows = (flags.get("windows") ?? "5,10,15,20,30")
+    .split(",")
+    .map((w) => Number(w.trim()))
+    .filter((w) => Number.isFinite(w) && w > 0);
+
+  const candles = await loadCandles(flags, "fixture", symbol, cfg.interval, count, cfg.fallbackFixturePath);
+  const externalProvider = await buildSignalProvider(flags, cfg, count);
+
+  const rows = windows.map((win) => {
+    const { summary } = runBacktest(
+      strategy,
+      candles,
+      {
+        symbol,
+        timeframeMin: win,
+        windowBars: win, // interval is 1m, so windowBars == minutes
+        confidenceFloor: cfg.confidenceFloor,
+        stride,
+        payout: cfg.payout,
+      },
+      externalProvider
+    );
+    return { win, summary };
+  });
+
+  const be = rows[0]?.summary.breakevenWinRate ?? 1 / cfg.payout;
+  const pct = (x: number) => `${(x * 100).toFixed(1)}%`;
+  const lines = [
+    "══════════ Expiry sweep ══════════",
+    `strategy ${strategy.name} · ${symbol} · payout ${cfg.payout}x · breakeven ${pct(be)}`,
+    `floor ${cfg.confidenceFloor} · ${candles.length} candles`,
+    "",
+    "  expiry   taken   winRate   ROI/trade   netPnL   edge-vs-BE",
+    ...rows.map((r) => {
+      const s = r.summary;
+      const edge = s.winRate - s.breakevenWinRate;
+      return (
+        `  ${String(r.win).padStart(4)}m  ${String(s.taken).padStart(6)}   ${pct(s.winRate).padStart(6)}   ` +
+        `${pct(s.roiPerTrade).padStart(8)}   ${s.netPnlUnits.toFixed(1).padStart(7)}   ` +
+        `${(edge >= 0 ? "+" : "") + pct(edge)}`
+      );
+    }),
+    "",
+    "Pick the window with the best ROI/trade at a taken-count big enough to trust",
+    "(aim for 50+ taken). Higher winRate at tiny taken-count is likely noise.",
+    "═══════════════════════════════════",
+  ];
+  console.log("\n" + lines.join("\n"));
 }
 
 async function cmdProfile(flags: Map<string, string>): Promise<void> {
@@ -202,6 +274,9 @@ async function main(): Promise<void> {
     case "profile":
       await cmdProfile(flags);
       break;
+    case "sweep":
+      await cmdSweep(flags);
+      break;
     case "run":
       await cmdRun();
       break;
@@ -216,6 +291,8 @@ async function main(): Promise<void> {
           `                     [--fixture path.json] [--signal COREUSDT | --signal-fixture path.json]\n` +
           `  peeperbot profile  [--symbol BTCUSDT] [--candles 20000] [--min-z 2.0] [--fixture path.json]\n` +
           `                     # measure spike→pullback behavior per vol regime (tunes spike-fade)\n` +
+          `  peeperbot sweep    [--windows 5,10,15,20,30] [--symbol BTCUSDT] [--candles 20000] [--signal COREUSDT]\n` +
+          `                     # backtest across expiry windows to pick the best (no-lookahead)\n` +
           `  peeperbot run       # live signal/alert loop (dry-run unless LIVE_TRADING=true)\n` +
           `  peeperbot report    # performance report from the journal\n\n` +
           `Strategies: ${listStrategies().join(", ")}\n`
