@@ -1,9 +1,8 @@
 name: CI
 
-# Mirrors docs/Product_Principles.md §4: nothing merges without traceable, working
-# changes. This runs lint, typecheck, and build across every workspace — it does not
-# run tests yet since no test suites exist for a pure scaffold; add a test job here
-# once specs start landing real implementations with real test coverage.
+# Runs lint, typecheck, and build across every workspace, plus the prdt-bot test
+# suite (the app with real coverage). Other inherited scaffold apps don't run
+# tests here yet as some assume a live database; scope new test steps per app.
 
 on:
   push:
@@ -33,3 +32,6 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      - name: Test (prdt-bot)
+        run: npm run test --workspace=apps/prdt-bot

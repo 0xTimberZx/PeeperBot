@@ -1,0 +1,9 @@
+# Bot runtime output
+data/
+*.jsonl
+
+# Local env
+.env
+
+# Build output
+dist/
