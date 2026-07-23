@@ -1,0 +1,31 @@
+{
+  "name": "@peeperbot/prdt-bot",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "PeeperBot — a selective trading-signal + backtest engine for the PRDT Finance Pro prediction market.",
+  "bin": {
+    "peeperbot": "src/cli.ts"
+  },
+  "scripts": {
+    "start": "tsx src/cli.ts",
+    "backtest": "tsx src/cli.ts backtest",
+    "run-live": "tsx src/cli.ts run",
+    "report": "tsx src/cli.ts report",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src --ext .ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.0",
+    "pg": "^8.12.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/pg": "^8.11.6",
+    "tsx": "^4.16.0",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0"
+  }
+}
