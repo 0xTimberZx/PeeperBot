@@ -21,7 +21,7 @@
 //          isn't done — block UP fades (don't catch BTC's knife). Symmetric
 //          light version for DOWN fades when CORE is ripping to fresh highs.
 
-import { mean, realizedVolatility, clamp } from "../stats.js";
+import { mean, realizedVolatility, percentileRank, clamp } from "../stats.js";
 import { type MarketContext, type Signal, type Strategy, noSignal } from "./types.js";
 
 export interface SpikeFadeParams {
@@ -43,6 +43,23 @@ export interface SpikeFadeParams {
   gateLookback: number;
   /** CORE gate: bars back for the CORE trend measurement. */
   gateLag: number;
+
+  // --- regime-adaptive expiry (opt-in; default OFF) ---
+  // The profiler found fades resolve fastest in high-vol tape and slower in
+  // calm tape, so the ideal PRDT expiry depends on the current vol regime.
+  // When enabled, the strategy tags each actionable signal with a per-trade
+  // expiry (Signal.expiryMin) picked from the current regime. Default false so
+  // behavior is unchanged until a backtest/sweep confirms the mapping pays.
+  adaptiveExpiry: boolean;
+  /** Expiry (min) in high / mid / low volatility regimes. */
+  expiryHighVol: number;
+  expiryMidVol: number;
+  expiryLowVol: number;
+  /** Trailing bars used to place current vol in its own distribution. */
+  regimeLookback: number;
+  /** Percentile cutoffs (of current baseline vol vs its trailing norm). */
+  regimeLowPct: number;
+  regimeHighPct: number;
 }
 
 export const DEFAULT_SPIKE_FADE_PARAMS: SpikeFadeParams = {
@@ -55,6 +72,13 @@ export const DEFAULT_SPIKE_FADE_PARAMS: SpikeFadeParams = {
   maxVolRatio: 3.0,
   gateLookback: 240,
   gateLag: 15,
+  adaptiveExpiry: false,
+  expiryHighVol: 5,
+  expiryMidVol: 15,
+  expiryLowVol: 25,
+  regimeLookback: 600,
+  regimeLowPct: 0.33,
+  regimeHighPct: 0.66,
 };
 
 export class SpikeFadeStrategy implements Strategy {
@@ -64,7 +88,9 @@ export class SpikeFadeStrategy implements Strategy {
 
   constructor(params: Partial<SpikeFadeParams> = {}) {
     this.p = { ...DEFAULT_SPIKE_FADE_PARAMS, ...params };
-    this.warmup = this.p.volLookback + this.p.spikeWindowBars + this.p.refMeanBars + 2;
+    const base = this.p.volLookback + this.p.spikeWindowBars + this.p.refMeanBars + 2;
+    // Adaptive expiry needs a trailing vol distribution; grow warmup to cover it.
+    this.warmup = this.p.adaptiveExpiry ? Math.max(base, this.p.regimeLookback + this.p.volLookback) : base;
   }
 
   evaluate(ctx: MarketContext): Signal {
@@ -172,14 +198,55 @@ export class SpikeFadeStrategy implements Strategy {
     if (direction === "DOWN" && gate.trend < 0 && !gate.freshHigh) confidence += 0.1;
     confidence = clamp(confidence, 0.5, 0.9);
 
+    // Regime-adaptive expiry (opt-in): tag the trade with a per-round window.
+    const adaptive = this.p.adaptiveExpiry ? this.adaptiveExpiryMin(closes) : undefined;
+    if (adaptive) {
+      features.regimePct = adaptive.pctile;
+      features.expiryMin = adaptive.expiryMin;
+    }
+
     return {
       direction,
       confidence,
+      ...(adaptive ? { expiryMin: adaptive.expiryMin } : {}),
       reason:
         `fade ${spikeUp ? "up" : "down"}-spike z=${z.toFixed(2)} peakAge=${peakAge} ` +
-        `retrace=${(retraceFrac * 100).toFixed(0)}% volX=${volRatio.toFixed(1)}`,
+        `retrace=${(retraceFrac * 100).toFixed(0)}% volX=${volRatio.toFixed(1)}` +
+        (adaptive ? ` expiry=${adaptive.expiryMin}m` : ""),
       features,
     };
+  }
+
+  /**
+   * Classify the current volatility regime (no lookahead) by placing the latest
+   * baseline vol in the distribution of trailing baseline vols, and map that to
+   * a PRDT expiry: high vol → short expiry (fast reversion), low vol → longer.
+   * Returns undefined when there isn't enough history to judge the regime.
+   */
+  private adaptiveExpiryMin(closes: number[]): { expiryMin: number; pctile: number } | undefined {
+    const need = this.p.regimeLookback + this.p.volLookback + 1;
+    if (closes.length < need) return undefined;
+
+    const current = realizedVolatility(closes.slice(-this.p.volLookback - 1));
+    if (current === 0) return undefined;
+
+    // Sample trailing baseline vol at a coarse stride to form the distribution.
+    const stride = Math.max(1, Math.floor(this.p.volLookback / 4));
+    const dist: number[] = [];
+    for (let end = closes.length - this.p.volLookback; end - this.p.volLookback - 1 >= closes.length - need; end -= stride) {
+      const v = realizedVolatility(closes.slice(end - this.p.volLookback - 1, end));
+      if (v > 0) dist.push(v);
+    }
+    if (dist.length < 3) return undefined;
+
+    const pctile = percentileRank(current, dist);
+    const expiryMin =
+      pctile >= this.p.regimeHighPct
+        ? this.p.expiryHighVol
+        : pctile < this.p.regimeLowPct
+          ? this.p.expiryLowVol
+          : this.p.expiryMidVol;
+    return { expiryMin, pctile };
   }
 
   /** CORE (or any configured signal asset) health readings; neutral when absent. */

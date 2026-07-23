@@ -167,7 +167,13 @@ export class LiveEngine {
       features: signal.features,
     });
 
-    const settleAt = now + this.windowMs();
+    // Per-signal expiry (regime-adaptive) if the strategy requested one, else
+    // the configured default window.
+    const settleMs =
+      signal.expiryMin && signal.expiryMin > 0
+        ? signal.expiryMin * 60_000
+        : this.windowMs();
+    const settleAt = now + settleMs;
 
     if (acted) {
       const result = await this.executor.execute({

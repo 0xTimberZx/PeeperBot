@@ -112,13 +112,17 @@ export function runBacktest(
 ): { summary: BacktestSummary; trades: TradeRecord[] } {
   const trades: TradeRecord[] = [];
   const stride = Math.max(1, cfg.stride);
+  // Minutes per candle (interval is 1m today; derived so it stays correct if
+  // that changes). Used to convert a signal's per-trade expiry into bars.
+  const intervalMin = cfg.windowBars > 0 ? cfg.timeframeMin / cfg.windowBars : 1;
 
-  // Start at warmup so the strategy has enough history; stop `windowBars` short
-  // of the end so every entry has a real settle bar.
-  for (let i = strategy.warmup; i < candles.length - cfg.windowBars; i += stride) {
+  // Start at warmup so the strategy has enough history. The settle bar is found
+  // per-entry (a signal may request its own expiry via signal.expiryMin —
+  // regime-adaptive windows), so we bounds-check each entry rather than
+  // trimming a fixed amount off the end.
+  for (let i = strategy.warmup; i < candles.length - 1; i += stride) {
     const entry = candles[i];
-    const settle = candles[i + cfg.windowBars];
-    if (entry === undefined || settle === undefined) continue;
+    if (entry === undefined) continue;
 
     const history = candles.slice(0, i + 1); // inclusive of entry bar, no lookahead
     const signal = strategy.evaluate({
@@ -128,6 +132,14 @@ export function runBacktest(
       entry,
       external: externalProvider(history),
     });
+
+    // Per-signal expiry (regime-adaptive) or the config default window.
+    const windowBars =
+      signal.expiryMin && signal.expiryMin > 0
+        ? Math.max(1, Math.round(signal.expiryMin / intervalMin))
+        : cfg.windowBars;
+    const settle = candles[i + windowBars];
+    if (settle === undefined) continue; // not enough forward bars for this expiry
 
     const taken = signal.direction !== "NONE" && signal.confidence >= cfg.confidenceFloor;
 
