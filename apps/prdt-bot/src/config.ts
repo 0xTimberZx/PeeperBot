@@ -39,7 +39,9 @@ export function intervalForTimeframe(timeframeMin: number): Interval {
 }
 
 export interface BotConfig {
-  symbols: string[]; // Binance symbols, e.g. ["BTCUSDT","ETHUSDT"]
+  symbols: string[]; // Binance symbols traded on PRDT, e.g. ["BTCUSDT"]
+  /** Cross-asset signal feed (not traded), e.g. COREUSDT for the CORE gate. */
+  signalSymbol: string | null;
   timeframeMin: number; // PRDT round window
   interval: Interval; // candle interval used for signals/settlement
   windowBars: number; // candles ahead the round settles (= timeframeMin / interval-min)
@@ -62,20 +64,26 @@ export interface BotConfig {
 }
 
 export function loadConfig(overrides: Partial<BotConfig> = {}): BotConfig {
-  const timeframeMin = num("PRDT_TIMEFRAME_MIN", 5);
+  // Defaults reflect the current play: trade BTC on PRDT Pro 30-min rounds,
+  // spike-fade strategy, CORE (not offered on PRDT) watched as the market-
+  // health signal. All overridable via env.
+  const timeframeMin = num("PRDT_TIMEFRAME_MIN", 30);
   const interval = intervalForTimeframe(timeframeMin);
   const intervalMin = 1; // interval is always 1m today; kept explicit for clarity
   const windowBars = Math.max(1, Math.round(timeframeMin / intervalMin));
 
+  const signalRaw = str("SIGNAL_SYMBOL", "COREUSDT").trim().toUpperCase();
+
   const cfg: BotConfig = {
-    symbols: str("PRDT_SYMBOLS", "BTCUSDT,ETHUSDT")
+    symbols: str("PRDT_SYMBOLS", "BTCUSDT")
       .split(",")
       .map((s) => s.trim().toUpperCase())
       .filter(Boolean),
+    signalSymbol: signalRaw === "" || signalRaw === "NONE" ? null : signalRaw,
     timeframeMin,
     interval,
     windowBars,
-    strategy: str("STRATEGY", "baseline-momentum-vol"),
+    strategy: str("STRATEGY", "spike-fade"),
     confidenceFloor: num("CONFIDENCE_FLOOR", 0.6),
     pollSeconds: num("POLL_SECONDS", 30),
     payout: num("PRDT_PAYOUT", 1.9),

@@ -12,9 +12,12 @@ export type Direction = "UP" | "DOWN" | "NONE";
  * Optional external context a strategy may consult. `brokerforce` carries the
  * read-only volatility-vs-norm signal sourced from the BrokerForce database
  * (null when BrokerForce isn't configured or doesn't cover this asset).
+ * `signal` carries a cross-asset feed (e.g. COREUSDT candles while trading
+ * BTC) — candles are guaranteed to end at/before the entry bar (no lookahead).
  */
 export interface ExternalContext {
   brokerforce: BrokerForceVolatility | null;
+  signal?: { symbol: string; candles: Candle[] } | null;
 }
 
 export interface BrokerForceVolatility {
