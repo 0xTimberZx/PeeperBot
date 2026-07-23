@@ -64,6 +64,13 @@ function buildExecutor(cfg: BotConfig): Executor {
   return cfg.onchain.liveTrading ? new OnchainExecutor(cfg.onchain) : new DryRunExecutor();
 }
 
+/** Resolve the trading side from --side (override) or config (TRADE_SIDE env). */
+function resolveSide(flags: Map<string, string>, cfg: BotConfig): "UP" | "DOWN" | undefined {
+  const raw = (flags.get("side") ?? cfg.side ?? "").toUpperCase();
+  if (raw === "UP" || raw === "DOWN") return raw;
+  return undefined;
+}
+
 /**
  * Load candles from --fixture (via `fixtureFlag`), or fetch `count` from
  * Binance. When the live fetch fails and a fallback fixture is configured
@@ -161,6 +168,7 @@ export async function cmdBacktest(flags: Map<string, string>): Promise<void> {
       stride,
       payout: cfg.payout,
       noOverlap: flags.has("no-overlap"),
+      side: resolveSide(flags, cfg),
     },
     externalProvider
   );
@@ -198,6 +206,7 @@ export async function cmdSweep(flags: Map<string, string>): Promise<void> {
         stride,
         payout: cfg.payout,
         noOverlap: flags.has("no-overlap"),
+        side: resolveSide(flags, cfg),
       },
       externalProvider
     );
@@ -295,7 +304,7 @@ async function main(): Promise<void> {
           `                     # measure spike→pullback behavior per vol regime (tunes spike-fade)\n` +
           `  peeperbot sweep    [--windows 5,10,15,20,30] [--symbol BTCUSDT] [--candles 20000] [--signal COREUSDT]\n` +
           `                     # backtest across expiry windows to pick the best (no-lookahead)\n` +
-          `                     # add --no-overlap for the live-faithful (one-open-round) number\n` +
+          `                     # add --no-overlap (live-faithful) and/or --side UP|DOWN (one side only)\n` +
           `  peeperbot run       # live signal/alert loop (dry-run unless LIVE_TRADING=true)\n` +
           `  peeperbot report    # performance report from the journal\n\n` +
           `Strategies: ${listStrategies().join(", ")}\n`

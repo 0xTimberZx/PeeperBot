@@ -46,6 +46,8 @@ export interface BotConfig {
   interval: Interval; // candle interval used for signals/settlement
   windowBars: number; // candles ahead the round settles (= timeframeMin / interval-min)
   strategy: string;
+  /** Restrict trading to one side: "UP" (buy), "DOWN" (sell), or null (both). */
+  side: "UP" | "DOWN" | null;
   confidenceFloor: number;
   pollSeconds: number; // live loop cadence
   payout: number;
@@ -86,6 +88,10 @@ export function loadConfig(overrides: Partial<BotConfig> = {}): BotConfig {
     interval,
     windowBars,
     strategy: str("STRATEGY", "spike-fade"),
+    side: ((): "UP" | "DOWN" | null => {
+      const raw = str("TRADE_SIDE", "").trim().toUpperCase();
+      return raw === "UP" || raw === "DOWN" ? raw : null;
+    })(),
     confidenceFloor: num("CONFIDENCE_FLOOR", 0.6),
     pollSeconds: num("POLL_SECONDS", 30),
     payout: num("PRDT_PAYOUT", 1.9),

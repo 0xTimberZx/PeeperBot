@@ -151,7 +151,8 @@ export class LiveEngine {
     });
 
     this.lastEntryAt.set(symbol, now);
-    const acted = signal.direction !== "NONE" && signal.confidence >= this.cfg.confidenceFloor;
+    const sideOk = !this.cfg.side || signal.direction === this.cfg.side;
+    const acted = signal.direction !== "NONE" && signal.confidence >= this.cfg.confidenceFloor && sideOk;
 
     await this.journal.append({
       kind: "signal",
