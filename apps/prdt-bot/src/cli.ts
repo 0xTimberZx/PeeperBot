@@ -160,6 +160,7 @@ export async function cmdBacktest(flags: Map<string, string>): Promise<void> {
       confidenceFloor: cfg.confidenceFloor,
       stride,
       payout: cfg.payout,
+      noOverlap: flags.has("no-overlap"),
     },
     externalProvider
   );
@@ -196,6 +197,7 @@ export async function cmdSweep(flags: Map<string, string>): Promise<void> {
         confidenceFloor: cfg.confidenceFloor,
         stride,
         payout: cfg.payout,
+        noOverlap: flags.has("no-overlap"),
       },
       externalProvider
     );
@@ -293,6 +295,7 @@ async function main(): Promise<void> {
           `                     # measure spike→pullback behavior per vol regime (tunes spike-fade)\n` +
           `  peeperbot sweep    [--windows 5,10,15,20,30] [--symbol BTCUSDT] [--candles 20000] [--signal COREUSDT]\n` +
           `                     # backtest across expiry windows to pick the best (no-lookahead)\n` +
+          `                     # add --no-overlap for the live-faithful (one-open-round) number\n` +
           `  peeperbot run       # live signal/alert loop (dry-run unless LIVE_TRADING=true)\n` +
           `  peeperbot report    # performance report from the journal\n\n` +
           `Strategies: ${listStrategies().join(", ")}\n`

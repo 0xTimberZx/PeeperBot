@@ -47,6 +47,30 @@ describe("backtest", () => {
     expect(summary.winRate).toBeGreaterThan(0.5);
   });
 
+  it("no-overlap mode spaces taken trades at least one window apart", () => {
+    // Strategy fires UP every bar; with a 5-bar window and noOverlap, taken
+    // trades must be >= 5 bars apart (a prior round must settle first).
+    const always: Strategy = {
+      name: "always",
+      warmup: 2,
+      evaluate: () => ({ direction: "UP", confidence: 1, reason: "x", features: {} }),
+    };
+    const closes = Array.from({ length: 120 }, (_, i) => 100 + i);
+    const { trades } = runBacktest(always, candleSeries(closes), {
+      ...cfg,
+      timeframeMin: 5,
+      windowBars: 5,
+      stride: 1,
+      noOverlap: true,
+    });
+    const takenTimes = trades.filter((t) => t.taken).map((t) => t.entryTime).sort((a, b) => a - b);
+    expect(takenTimes.length).toBeGreaterThan(1);
+    for (let i = 1; i < takenTimes.length; i++) {
+      // >= 5 candles (5 * 60_000 ms) between consecutive taken entries
+      expect(takenTimes[i]! - takenTimes[i - 1]!).toBeGreaterThanOrEqual(5 * 60_000);
+    }
+  });
+
   it("honors a signal's per-trade expiry (regime-adaptive window)", () => {
     // Stub strategy that always fires UP with a 1-minute expiry, overriding the
     // config's 5-bar window. Settlement must land 1 bar out, not 5.
