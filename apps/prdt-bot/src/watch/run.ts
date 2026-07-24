@@ -115,7 +115,8 @@ export function watchConfigFromEnv(cfg: BotConfig): WatchLoopConfig {
       // Keep in sync with DEFAULT_WATCH_PARAMS: a normal ~1% BTC wiggle while
       // CORE (high beta) dumps is CORE-specific, not a market-wide washout.
       marketWideBtcDrop: num("WATCH_MARKET_WIDE_BTC_DROP", 0.025),
-      hardSupport: num("CORE_HARD_SUPPORT", 0.02),
+      // 0 = disabled: the pivot band is the primary, auto-adjusting floor.
+      hardSupport: num("CORE_HARD_SUPPORT", 0),
     },
   };
 }

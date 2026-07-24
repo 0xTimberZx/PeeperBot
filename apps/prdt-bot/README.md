@@ -231,10 +231,13 @@ market-wide (BTC falling too), the flush is likely near exhaustion — go look f
 a BTC reversal (UP).*
 
 - **The floor** = average of the K lowest daily pivot lows over ~6–9 months
-  (your "bottom moving average") — see `analysis/pivots.ts`.
-- **Trigger** = CORE within `WATCH_PROXIMITY_PCT` of that floor **and** down at
-  least `WATCH_DROP_PCT` over `WATCH_DROP_WINDOW_HRS`. Alert loudness scales with
-  how close CORE is to the band; your `CORE_HARD_SUPPORT` (0.02) line is noted.
+  (your "bottom moving average") — see `analysis/pivots.ts`. This **auto-adjusts**
+  as new lows form, so it never goes stale. `CORE_HARD_SUPPORT` is optional
+  (default `0` = off); set a positive value only for an extra manual line.
+- **Trigger** = CORE within `WATCH_PROXIMITY_PCT` of that band **and** down at
+  least `WATCH_DROP_PCT` over `WATCH_DROP_WINDOW_HRS`. A price crashed far *below*
+  the band is a breakdown, not "at the floor" — it stays quiet until price
+  returns to the band. Alert loudness scales with how close CORE is.
 - **Market vs CORE** = it compares CORE's drop to BTC's; a market-wide washout
   is flagged as higher-conviction, a CORE-only drop as weaker.
 
