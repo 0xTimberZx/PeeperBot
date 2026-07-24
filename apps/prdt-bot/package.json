@@ -15,6 +15,7 @@
     "run-live": "tsx src/cli.ts run",
     "watch": "tsx src/cli.ts watch",
     "check": "tsx src/cli.ts check",
+    "regime": "tsx src/cli.ts regime",
     "report": "tsx src/cli.ts report",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit",
