@@ -32,7 +32,12 @@ export interface WatchParams {
    * CORE-specific, not a market washout.
    */
   marketWideBtcDrop: number;
-  /** Reference hard-support price the trader watches (e.g. 0.02). */
+  /**
+   * OPTIONAL fixed hard-support line. 0 = disabled (the DEFAULT): the pivot
+   * band is the primary, auto-adjusting floor, so nothing goes stale when CORE
+   * makes new lows. Set a positive value only if you want an extra manual line
+   * on top of the band.
+   */
   hardSupport: number;
 }
 
@@ -43,7 +48,7 @@ export const DEFAULT_WATCH_PARAMS: WatchParams = {
   dropPct: 0.05,
   dropWindowBars: 24,
   marketWideBtcDrop: 0.025, // BTC must be down ~2.5%+ to count as market-wide
-  hardSupport: 0.02,
+  hardSupport: 0, // band-primary; no static line by default
 };
 
 export interface WatchInput {
@@ -79,14 +84,17 @@ export function evaluateWatch(input: WatchInput, params: Partial<WatchParams> = 
 
   const distancePct = band && band > 0 ? corePrice / band - 1 : Number.POSITIVE_INFINITY;
   const marketWide = btcMovePct <= -p.marketWideBtcDrop;
-  const belowHardSupport = corePrice > 0 && corePrice <= p.hardSupport;
-  // Near the 0.02 hard-support line (at/below, within a proximity margin above).
-  const atHardSupport = corePrice > 0 && corePrice <= p.hardSupport * (1 + p.proximityPct);
+  // Hard-support line is optional (0 = disabled): the pivot band is the primary
+  // floor. Only consult a static line when one is explicitly configured.
+  const hsEnabled = p.hardSupport > 0;
+  const belowHardSupport = hsEnabled && corePrice > 0 && corePrice <= p.hardSupport;
+  const atHardSupport = hsEnabled && corePrice > 0 && corePrice <= p.hardSupport * (1 + p.proximityPct);
 
-  // Trigger zone: kissing the pivot band from EITHER side (within proximity), OR
-  // sitting at the hard-support line. A price that has crashed far below the band
-  // (|distance| > proximity) is a breakdown, not "at the floor" — so it only
-  // still triggers if it's specifically at the hard-support line.
+  // Trigger zone: kissing the pivot band from EITHER side (within proximity) —
+  // the band auto-updates as new lows form, so it never goes stale. A price
+  // crashed far below the band (|distance| > proximity) is a breakdown, not "at
+  // the floor", and stays quiet until price returns to the band. An optional
+  // static hard-support line can add a second trigger when configured.
   const inBandZone = Math.abs(distancePct) <= p.proximityPct;
   const near = inBandZone || atHardSupport;
   const dropping = coreDropPct <= -p.dropPct;
@@ -108,14 +116,15 @@ export function evaluateWatch(input: WatchInput, params: Partial<WatchParams> = 
     : `BTC only ${pctS(btcMovePct)} → looks CORE-specific: weaker signal, CORE may keep bleeding.`;
 
   // State-aware headline so "approaching" isn't printed when price is already
-  // below the band.
+  // below the band. The band is the primary floor; the static line is only
+  // named when it's the thing being touched.
   let headline: string;
-  if (atHardSupport) {
+  if (atHardSupport && !inBandZone) {
     headline = `🎯 CORE at your ${p.hardSupport} hard-support line — the zone you watch for buying.`;
   } else if (distancePct >= 0) {
-    headline = `🎯 CORE approaching its ${p.kLowest}-pivot floor from above.`;
+    headline = `🎯 CORE approaching its ${p.kLowest}-pivot floor (band ${priceS(band ?? 0)}) from above.`;
   } else {
-    headline = `🎯 CORE dipped just under its ${p.kLowest}-pivot floor.`;
+    headline = `🎯 CORE dipped just under its ${p.kLowest}-pivot floor (band ${priceS(band ?? 0)}).`;
   }
 
   const message = band === null

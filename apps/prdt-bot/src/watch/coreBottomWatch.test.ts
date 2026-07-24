@@ -59,22 +59,38 @@ describe("evaluateWatch", () => {
     expect(r.message).toContain("CORE-specific");
   });
 
-  it("labels a below-band drop at hard support as CORE-specific when BTC barely moved", () => {
-    // The exact live-fire scenario: CORE crashed to 0.02 (below the ~0.021 band)
-    // while BTC only slipped ~1.3%. Should trigger via hard support, NOT be
-    // called market-wide, and not say "approaching".
-    const coreToSupport = hourly([0.0238, 0.023, 0.022, 0.0212, 0.0205, 0.02]);
+  it("band-primary: a below-band dip near the floor reads CORE-specific when BTC barely moved", () => {
+    // CORE dips just under the ~0.021 band while BTC slips only ~1.3%. With the
+    // default (hard support disabled), it triggers via the band zone, is NOT
+    // market-wide, and doesn't say "approaching" (it's below the band).
+    const coreDip = hourly([0.0238, 0.023, 0.022, 0.0212, 0.0205, 0.0201]);
     const btcWiggle = hourly([65800, 65700, 65600, 65400, 65200, 64952]); // ~-1.3%
     const r = evaluateWatch(
-      { coreDaily, coreRecent: coreToSupport, btcRecent: btcWiggle },
-      { dropWindowBars: 5, dropPct: 0.05 }
+      { coreDaily, coreRecent: coreDip, btcRecent: btcWiggle },
+      { dropWindowBars: 5, dropPct: 0.05, proximityPct: 0.12 }
     );
     expect(r.triggered).toBe(true);
     expect(r.distancePct).toBeLessThan(0); // below the band
     expect(r.marketWide).toBe(false); // 1.3% BTC is NOT a washout
-    expect(r.message).toContain("hard-support");
+    expect(r.belowHardSupport).toBe(false); // hard support disabled by default
+    expect(r.message).toContain("floor"); // band-based headline
     expect(r.message).toContain("CORE-specific");
     expect(r.message).not.toContain("approaching");
+  });
+
+  it("optional hard-support line still triggers when explicitly configured", () => {
+    // CORE breaks BELOW the band by more than proximity (so it's not in the band
+    // zone), but sits at a manually-set 0.02 line: it fires via hard support and
+    // names it. Band ~0.0205, proximity 4%, price 0.0196 => -4.4% (below zone).
+    const coreToSupport = hourly([0.03, 0.027, 0.024, 0.021, 0.0205, 0.0196]);
+    const btcWiggle = hourly([65800, 65700, 65600, 65400, 65200, 64952]);
+    const r = evaluateWatch(
+      { coreDaily, coreRecent: coreToSupport, btcRecent: btcWiggle },
+      { dropWindowBars: 5, dropPct: 0.05, proximityPct: 0.04, hardSupport: 0.02 }
+    );
+    expect(r.triggered).toBe(true);
+    expect(r.belowHardSupport).toBe(true); // 0.0196 < 0.02
+    expect(r.message).toContain("hard-support");
   });
 
   it("does not trigger when CORE is far above the band", () => {
