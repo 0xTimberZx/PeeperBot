@@ -9,9 +9,12 @@
     "packages/*"
   ],
   "scripts": {
+    "bot:env": "npm run env:init --workspace=apps/prdt-bot",
     "bot:backtest": "npm run backtest --workspace=apps/prdt-bot --",
     "bot:run": "npm run run-live --workspace=apps/prdt-bot",
     "bot:report": "npm run report --workspace=apps/prdt-bot",
+    "bot:regime": "npm run regime --workspace=apps/prdt-bot",
+    "bot:watch": "npm run watch --workspace=apps/prdt-bot",
     "dev:web": "npm run dev --workspace=apps/web",
     "dev:api": "npm run dev --workspace=apps/api",
     "migrate": "npm run migrate --workspace=packages/db",
