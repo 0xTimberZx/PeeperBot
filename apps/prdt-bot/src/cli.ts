@@ -10,7 +10,7 @@
 
 import { loadConfig, type BotConfig } from "./config.js";
 import { createStrategy, listStrategies } from "./strategy/registry.js";
-import { fetchHistory, parseFixture, type Candle } from "./feed/binance.js";
+import { fetchHistory, fetchKlines, parseFixture, type Candle } from "./feed/binance.js";
 import { runBacktest, alignedSignalProvider, type ExternalContextProvider } from "./engine/backtest.js";
 import { formatBacktest } from "./analysis/backtestFormat.js";
 import { detectAndProfile, formatProfile } from "./analysis/spikeProfile.js";
@@ -21,6 +21,8 @@ import { DryRunExecutor, OnchainExecutor, type Executor } from "./execution.js";
 import { LiveEngine } from "./engine/live.js";
 import { makeBrokerForceProvider } from "./brokerforce/volatility.js";
 import { CoreBottomWatcher, watchConfigFromEnv } from "./watch/run.js";
+import { evaluateEntry, verdictForSide } from "./analysis/entryCheck.js";
+import { RegimeMonitor, regimeConfigFromEnv } from "./regime/run.js";
 import { access, readFile } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -281,6 +283,38 @@ async function cmdWatch(): Promise<void> {
   await watcher.start();
 }
 
+async function cmdCheck(flags: Map<string, string>): Promise<void> {
+  const cfg = loadConfig();
+  const symbol = (flags.get("symbol") ?? cfg.symbols[0] ?? "BTCUSDT").toUpperCase();
+  const side = ((flags.get("side") ?? "").toUpperCase() === "UP"
+    ? "UP"
+    : (flags.get("side") ?? "").toUpperCase() === "DOWN"
+      ? "DOWN"
+      : undefined) as "UP" | "DOWN" | undefined;
+
+  const candles = await fetchKlines({ symbol, interval: cfg.interval, limit: 200 });
+  const result = evaluateEntry(candles);
+  console.log(
+    `\n══════════ Entry check · ${symbol} ══════════\n` +
+      result.message +
+      (side ? `\n\nYour intended ${side}: ${verdictForSide(result, side)}` : "") +
+      "\n═══════════════════════════════════════════"
+  );
+}
+
+async function cmdRegime(): Promise<void> {
+  const cfg = loadConfig();
+  const dispatcher = buildDispatcher(cfg);
+  const monitor = new RegimeMonitor(regimeConfigFromEnv(cfg), cfg, dispatcher, cfg.timeframeMin);
+  const shutdown = () => {
+    console.log("\n[regime] shutting down…");
+    monitor.stop();
+  };
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
+  await monitor.start();
+}
+
 async function cmdReport(): Promise<void> {
   const cfg = loadConfig();
   const journal = new JsonlJournal(cfg.journalPath);
@@ -308,6 +342,12 @@ async function main(): Promise<void> {
     case "watch":
       await cmdWatch();
       break;
+    case "check":
+      await cmdCheck(flags);
+      break;
+    case "regime":
+      await cmdRegime();
+      break;
     case "report":
       await cmdReport();
       break;
@@ -324,6 +364,8 @@ async function main(): Promise<void> {
           `                     # add --no-overlap (live-faithful) and/or --side UP|DOWN (one side only)\n` +
           `  peeperbot run       # live signal/alert loop (dry-run unless LIVE_TRADING=true)\n` +
           `  peeperbot watch     # CORE-bottom watch: alert to hunt a BTC reversal when CORE nears its 6-mo floor\n` +
+          `  peeperbot check     [--symbol BTCUSDT] [--side UP|DOWN]  # "am I chasing?" — pre-entry timing mirror\n` +
+          `  peeperbot regime    # macro monitor: BrokerForce regime shifts + new Core/BTC/ratio highs & lows\n` +
           `  peeperbot report    # performance report from the journal\n\n` +
           `Strategies: ${listStrategies().join(", ")}\n`
       );
