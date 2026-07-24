@@ -8,6 +8,7 @@
     "peeperbot": "src/cli.ts"
   },
   "scripts": {
+    "env:init": "node -e \"const fs=require('fs'); if(fs.existsSync('.env')){console.log('apps/prdt-bot/.env already exists — left as is. Edit it and paste your tokens at the top.')}else{fs.copyFileSync('.env.example','.env');console.log('Created apps/prdt-bot/.env. Paste TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID at the top, then: npm run regime --workspace=apps/prdt-bot')}\"",
     "start": "tsx src/cli.ts",
     "backtest": "tsx src/cli.ts backtest",
     "profile": "tsx src/cli.ts profile",
