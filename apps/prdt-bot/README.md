@@ -198,6 +198,30 @@ Same detector as `spike-fade`, used as a discipline check rather than a trader.
 It won't stop you — it just tells you, at the moment of temptation, whether
 you're buying a pop (bad timing) or a held dip (good timing).
 
+## Regime monitor (`peeperbot regime`)
+
+The macro heads-up — the opposite of the minute-timing game. It **mixes the two
+data sources**: BrokerForce's volatility-vs-norm regime (its whole purpose) for
+BTC and CORE, plus new **highs/lows** for BTC, CORE, and the **CORE/BTC ratio**
+(relative strength — is CORE out- or under-performing BTC to a new extreme?). It
+polls slowly (15 min) and only alerts when the diff against the last check
+surfaces something **sizeable and new**:
+
+```
+Regime update (BrokerForce + Core/BTC extremes):
+• BTC volatility regime → EXTREME vs norm (z=3.10)
+• CORE/BTC ratio broke to a NEW LOW (0.000305)
+→ CORE capitulating vs BTC (alt weakness / market fear)
+```
+
+```bash
+npm run regime --workspace=apps/prdt-bot     # set BROKERFORCE_DATABASE_URL for the regime half
+```
+
+BrokerForce is best-effort: without `BROKERFORCE_DATABASE_URL` (or for uncovered
+assets) it still runs the new-high/low half from the live feed. Thresholds are
+env-tunable (`REGIME_*`).
+
 ## CORE-bottom watch (`peeperbot watch`)
 
 A discretionary **shoulder-tap alert**, separate from the spike-fade trader. It

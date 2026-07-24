@@ -22,6 +22,7 @@ import { LiveEngine } from "./engine/live.js";
 import { makeBrokerForceProvider } from "./brokerforce/volatility.js";
 import { CoreBottomWatcher, watchConfigFromEnv } from "./watch/run.js";
 import { evaluateEntry, verdictForSide } from "./analysis/entryCheck.js";
+import { RegimeMonitor, regimeConfigFromEnv } from "./regime/run.js";
 import { access, readFile } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -301,6 +302,19 @@ async function cmdCheck(flags: Map<string, string>): Promise<void> {
   );
 }
 
+async function cmdRegime(): Promise<void> {
+  const cfg = loadConfig();
+  const dispatcher = buildDispatcher(cfg);
+  const monitor = new RegimeMonitor(regimeConfigFromEnv(cfg), cfg, dispatcher, cfg.timeframeMin);
+  const shutdown = () => {
+    console.log("\n[regime] shutting down…");
+    monitor.stop();
+  };
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
+  await monitor.start();
+}
+
 async function cmdReport(): Promise<void> {
   const cfg = loadConfig();
   const journal = new JsonlJournal(cfg.journalPath);
@@ -331,6 +345,9 @@ async function main(): Promise<void> {
     case "check":
       await cmdCheck(flags);
       break;
+    case "regime":
+      await cmdRegime();
+      break;
     case "report":
       await cmdReport();
       break;
@@ -348,6 +365,7 @@ async function main(): Promise<void> {
           `  peeperbot run       # live signal/alert loop (dry-run unless LIVE_TRADING=true)\n` +
           `  peeperbot watch     # CORE-bottom watch: alert to hunt a BTC reversal when CORE nears its 6-mo floor\n` +
           `  peeperbot check     [--symbol BTCUSDT] [--side UP|DOWN]  # "am I chasing?" — pre-entry timing mirror\n` +
+          `  peeperbot regime    # macro monitor: BrokerForce regime shifts + new Core/BTC/ratio highs & lows\n` +
           `  peeperbot report    # performance report from the journal\n\n` +
           `Strategies: ${listStrategies().join(", ")}\n`
       );
