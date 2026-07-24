@@ -173,6 +173,31 @@ backtester and live engine both honor the per-trade window. **On the data so
 far, flat 15m beat adaptive**, so it's off by default; only enable it if a
 regime-split test proves a regime genuinely prefers a different window.
 
+## "Am I chasing?" pre-entry check (`peeperbot check`)
+
+A mirror for manual trades. The most common way to lose a short PRDT round is to
+enter *in the direction of an already-extended move* — buying strength right as
+it exhausts and mean-reverts ("it reacts the moment I enter"). Before you click
+UP/DOWN, ask:
+
+```bash
+npm run check --workspace=apps/prdt-bot -- --symbol BTCUSDT --side UP
+```
+
+It reads how stretched the move is (displacement in vol units), whether entering
+each side would be **chasing**, and which side the reversion favors:
+
+```
+BTC +0.41% over last 8 bars · z=2.3 (stretched · still extending).
+Enter UP = CHASE ⚠ · Enter DOWN = ok.
+You'd be CHASING if you enter UP — buying up strength that tends to snap back
+inside a short PRDT window. WAIT for a pullback and a stall; reversion favors DOWN.
+```
+
+Same detector as `spike-fade`, used as a discipline check rather than a trader.
+It won't stop you — it just tells you, at the moment of temptation, whether
+you're buying a pop (bad timing) or a held dip (good timing).
+
 ## CORE-bottom watch (`peeperbot watch`)
 
 A discretionary **shoulder-tap alert**, separate from the spike-fade trader. It
