@@ -111,7 +111,9 @@ export function watchConfigFromEnv(cfg: BotConfig): WatchLoopConfig {
       proximityPct: num("WATCH_PROXIMITY_PCT", 0.06),
       dropPct: num("WATCH_DROP_PCT", 0.05),
       dropWindowBars: num("WATCH_DROP_WINDOW_HRS", 24),
-      marketWideBtcDrop: num("WATCH_MARKET_WIDE_BTC_DROP", 0.01),
+      // Keep in sync with DEFAULT_WATCH_PARAMS: a normal ~1% BTC wiggle while
+      // CORE (high beta) dumps is CORE-specific, not a market-wide washout.
+      marketWideBtcDrop: num("WATCH_MARKET_WIDE_BTC_DROP", 0.025),
       hardSupport: num("CORE_HARD_SUPPORT", 0.02),
     },
   };
