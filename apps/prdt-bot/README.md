@@ -48,6 +48,12 @@ will be much lower.** Trust your own backtest on real candles, not the demo.
 
 ```bash
 npm install
+npm run bot:env                                     # creates apps/prdt-bot/.env
+# → paste TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID at the TOP of that file for
+#   phone alerts (DM @BotFather for the token, @userinfobot for the id, then
+#   open your bot and tap Start once). Or leave blank for console-only.
+
+# (equivalent manual step:)
 cp apps/prdt-bot/.env.example apps/prdt-bot/.env    # then edit
 
 # Backtest the baseline strategy on real BTC candles from Binance:
