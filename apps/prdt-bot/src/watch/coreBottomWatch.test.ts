@@ -59,6 +59,24 @@ describe("evaluateWatch", () => {
     expect(r.message).toContain("CORE-specific");
   });
 
+  it("labels a below-band drop at hard support as CORE-specific when BTC barely moved", () => {
+    // The exact live-fire scenario: CORE crashed to 0.02 (below the ~0.021 band)
+    // while BTC only slipped ~1.3%. Should trigger via hard support, NOT be
+    // called market-wide, and not say "approaching".
+    const coreToSupport = hourly([0.0238, 0.023, 0.022, 0.0212, 0.0205, 0.02]);
+    const btcWiggle = hourly([65800, 65700, 65600, 65400, 65200, 64952]); // ~-1.3%
+    const r = evaluateWatch(
+      { coreDaily, coreRecent: coreToSupport, btcRecent: btcWiggle },
+      { dropWindowBars: 5, dropPct: 0.05 }
+    );
+    expect(r.triggered).toBe(true);
+    expect(r.distancePct).toBeLessThan(0); // below the band
+    expect(r.marketWide).toBe(false); // 1.3% BTC is NOT a washout
+    expect(r.message).toContain("hard-support");
+    expect(r.message).toContain("CORE-specific");
+    expect(r.message).not.toContain("approaching");
+  });
+
   it("does not trigger when CORE is far above the band", () => {
     const coreHigh = hourly([0.05, 0.049, 0.048, 0.047, 0.046, 0.045]);
     const btcDown = hourly([70000, 69000, 68000, 67000, 66500, 66000]);

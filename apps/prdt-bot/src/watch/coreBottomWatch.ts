@@ -25,7 +25,12 @@ export interface WatchParams {
   dropPct: number;
   /** Drop window, in bars of the recent (hourly) series. */
   dropWindowBars: number;
-  /** BTC move over the window beyond which we call it market-wide (e.g. 0.01). */
+  /**
+   * BTC move over the window beyond which we call it market-wide. CORE is high
+   * beta and will always fall further, so this gates on BTC's OWN drop being
+   * meaningful (not a ratio) — a normal ~1% BTC wiggle while CORE dumps is
+   * CORE-specific, not a market washout.
+   */
   marketWideBtcDrop: number;
   /** Reference hard-support price the trader watches (e.g. 0.02). */
   hardSupport: number;
@@ -37,7 +42,7 @@ export const DEFAULT_WATCH_PARAMS: WatchParams = {
   proximityPct: 0.06,
   dropPct: 0.05,
   dropWindowBars: 24,
-  marketWideBtcDrop: 0.01,
+  marketWideBtcDrop: 0.025, // BTC must be down ~2.5%+ to count as market-wide
   hardSupport: 0.02,
 };
 
@@ -75,14 +80,26 @@ export function evaluateWatch(input: WatchInput, params: Partial<WatchParams> = 
   const distancePct = band && band > 0 ? corePrice / band - 1 : Number.POSITIVE_INFINITY;
   const marketWide = btcMovePct <= -p.marketWideBtcDrop;
   const belowHardSupport = corePrice > 0 && corePrice <= p.hardSupport;
+  // Near the 0.02 hard-support line (at/below, within a proximity margin above).
+  const atHardSupport = corePrice > 0 && corePrice <= p.hardSupport * (1 + p.proximityPct);
 
-  const near = distancePct <= p.proximityPct;
+  // Trigger zone: kissing the pivot band from EITHER side (within proximity), OR
+  // sitting at the hard-support line. A price that has crashed far below the band
+  // (|distance| > proximity) is a breakdown, not "at the floor" — so it only
+  // still triggers if it's specifically at the hard-support line.
+  const inBandZone = Math.abs(distancePct) <= p.proximityPct;
+  const near = inBandZone || atHardSupport;
   const dropping = coreDropPct <= -p.dropPct;
   const triggered = band !== null && near && dropping;
 
-  // Severity: 1 at/below the band, 0 at the edge of the proximity zone.
+  // Severity: 1 at/below hard support or at the band, decaying to 0 at the edge
+  // of the proximity zone.
   const severity =
-    band === null ? 0 : Math.max(0, Math.min(1, 1 - distancePct / p.proximityPct));
+    band === null
+      ? 0
+      : belowHardSupport
+        ? 1
+        : Math.max(0, Math.min(1, 1 - Math.abs(distancePct) / p.proximityPct));
 
   const pctS = (x: number) => `${(x * 100).toFixed(1)}%`;
   const priceS = (x: number) => x.toFixed(4);
@@ -90,12 +107,23 @@ export function evaluateWatch(input: WatchInput, params: Partial<WatchParams> = 
     ? `BTC ${pctS(btcMovePct)} too → MARKET-WIDE washout: higher-conviction, watch BTC for the reversal (UP).`
     : `BTC only ${pctS(btcMovePct)} → looks CORE-specific: weaker signal, CORE may keep bleeding.`;
 
+  // State-aware headline so "approaching" isn't printed when price is already
+  // below the band.
+  let headline: string;
+  if (atHardSupport) {
+    headline = `🎯 CORE at your ${p.hardSupport} hard-support line — the zone you watch for buying.`;
+  } else if (distancePct >= 0) {
+    headline = `🎯 CORE approaching its ${p.kLowest}-pivot floor from above.`;
+  } else {
+    headline = `🎯 CORE dipped just under its ${p.kLowest}-pivot floor.`;
+  }
+
   const message = band === null
     ? "CORE bottom watch: not enough history to compute the band yet."
     : triggered
-      ? `🎯 CORE approaching its ${p.kLowest}-pivot 6-mo floor.\n` +
-        `CORE ${priceS(corePrice)} · band ${priceS(band)} (${pctS(distancePct)} away) · ${pctS(coreDropPct)} over window.\n` +
-        `${belowHardSupport ? `Below the ${p.hardSupport} hard-support line. ` : ""}${marketNote}`
+      ? `${headline}\n` +
+        `CORE ${priceS(corePrice)} · band ${priceS(band)} (${pctS(distancePct)} vs band) · ${pctS(coreDropPct)} over window.\n` +
+        `${marketNote}`
       : `CORE ${priceS(corePrice)} vs band ${priceS(band)} (${pctS(distancePct)} away, drop ${pctS(coreDropPct)}) — no trigger.`;
 
   return {
