@@ -293,7 +293,7 @@ async function cmdCheck(flags: Map<string, string>): Promise<void> {
       : undefined) as "UP" | "DOWN" | undefined;
 
   const candles = await fetchKlines({ symbol, interval: cfg.interval, limit: 200 });
-  const result = evaluateEntry(candles);
+  const result = evaluateEntry(candles, {}, symbol);
   console.log(
     `\n══════════ Entry check · ${symbol} ══════════\n` +
       result.message +

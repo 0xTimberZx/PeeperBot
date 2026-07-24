@@ -74,6 +74,7 @@ export class RegimeMonitor {
         strategy: "regime-monitor",
         live: false,
         ts: now,
+        kind: "info",
       };
       await this.dispatcher.dispatch(alert);
     } else {
