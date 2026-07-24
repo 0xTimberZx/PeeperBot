@@ -13,6 +13,7 @@
     "profile": "tsx src/cli.ts profile",
     "sweep": "tsx src/cli.ts sweep",
     "run-live": "tsx src/cli.ts run",
+    "watch": "tsx src/cli.ts watch",
     "report": "tsx src/cli.ts report",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit",

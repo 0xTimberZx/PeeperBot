@@ -20,6 +20,7 @@ import { AlertDispatcher, ConsoleChannel, TelegramChannel, DiscordChannel, type 
 import { DryRunExecutor, OnchainExecutor, type Executor } from "./execution.js";
 import { LiveEngine } from "./engine/live.js";
 import { makeBrokerForceProvider } from "./brokerforce/volatility.js";
+import { CoreBottomWatcher, watchConfigFromEnv } from "./watch/run.js";
 import { access, readFile } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -267,6 +268,19 @@ async function cmdRun(): Promise<void> {
   await engine.start();
 }
 
+async function cmdWatch(): Promise<void> {
+  const cfg = loadConfig();
+  const dispatcher = buildDispatcher(cfg);
+  const watcher = new CoreBottomWatcher(watchConfigFromEnv(cfg), dispatcher, cfg.timeframeMin);
+  const shutdown = () => {
+    console.log("\n[watch] shutting down…");
+    watcher.stop();
+  };
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
+  await watcher.start();
+}
+
 async function cmdReport(): Promise<void> {
   const cfg = loadConfig();
   const journal = new JsonlJournal(cfg.journalPath);
@@ -291,6 +305,9 @@ async function main(): Promise<void> {
     case "run":
       await cmdRun();
       break;
+    case "watch":
+      await cmdWatch();
+      break;
     case "report":
       await cmdReport();
       break;
@@ -306,6 +323,7 @@ async function main(): Promise<void> {
           `                     # backtest across expiry windows to pick the best (no-lookahead)\n` +
           `                     # add --no-overlap (live-faithful) and/or --side UP|DOWN (one side only)\n` +
           `  peeperbot run       # live signal/alert loop (dry-run unless LIVE_TRADING=true)\n` +
+          `  peeperbot watch     # CORE-bottom watch: alert to hunt a BTC reversal when CORE nears its 6-mo floor\n` +
           `  peeperbot report    # performance report from the journal\n\n` +
           `Strategies: ${listStrategies().join(", ")}\n`
       );

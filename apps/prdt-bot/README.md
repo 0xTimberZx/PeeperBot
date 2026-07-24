@@ -173,6 +173,31 @@ backtester and live engine both honor the per-trade window. **On the data so
 far, flat 15m beat adaptive**, so it's off by default; only enable it if a
 regime-split test proves a regime genuinely prefers a different window.
 
+## CORE-bottom watch (`peeperbot watch`)
+
+A discretionary **shoulder-tap alert**, separate from the spike-fade trader. It
+encodes the thesis: *in a choppy-up market, CORE (tiny-cap alt canary) grinds a
+multi-month floor; when CORE drops hard toward that floor and the drop is
+market-wide (BTC falling too), the flush is likely near exhaustion — go look for
+a BTC reversal (UP).*
+
+- **The floor** = average of the K lowest daily pivot lows over ~6–9 months
+  (your "bottom moving average") — see `analysis/pivots.ts`.
+- **Trigger** = CORE within `WATCH_PROXIMITY_PCT` of that floor **and** down at
+  least `WATCH_DROP_PCT` over `WATCH_DROP_WINDOW_HRS`. Alert loudness scales with
+  how close CORE is to the band; your `CORE_HARD_SUPPORT` (0.02) line is noted.
+- **Market vs CORE** = it compares CORE's drop to BTC's; a market-wide washout
+  is flagged as higher-conviction, a CORE-only drop as weaker.
+
+```bash
+npm run watch --workspace=apps/prdt-bot     # console alerts; add Telegram/Discord env for push
+```
+
+**This is not a backtested edge** — the trigger is rare (a few times a year), so
+it can't be win-rate-validated. It exists to bring *you* in at the moment your
+setup occurs; the trade decision stays yours. All thresholds are env-tunable
+(see `.env.example`).
+
 ## Plugging in your own formula
 
 The whole engine is strategy-agnostic. To backtest your formula:
