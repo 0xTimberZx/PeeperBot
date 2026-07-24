@@ -15,6 +15,13 @@ export interface Alert {
   strategy: string;
   live: boolean; // whether this alert corresponds to a real trade being placed
   ts: number;
+  /**
+   * "trade" (default) renders the entry/direction/confidence line — a PRDT
+   * round call. "info" is a macro heads-up (regime shifts, CORE-bottom watch)
+   * and renders as a headline + body only, so it never looks like a broken
+   * trade signal (no "DOWN @ price · confidence 0%").
+   */
+  kind?: "trade" | "info";
 }
 
 export interface AlertChannel {
@@ -22,7 +29,12 @@ export interface AlertChannel {
   send(alert: Alert): Promise<void>;
 }
 
-function formatAlert(a: Alert): string {
+export function formatAlert(a: Alert): string {
+  // Macro/info alert: headline + body, no trade line.
+  if (a.kind === "info") {
+    return `📡 PeeperBot · ${a.strategy} (${a.symbol})\n${a.reason}`;
+  }
+  // Trade-round call.
   const mode = a.live ? "LIVE TRADE" : "SIGNAL (dry-run)";
   const conf = (a.confidence * 100).toFixed(0);
   return (

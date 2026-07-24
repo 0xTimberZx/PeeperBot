@@ -62,6 +62,7 @@ export class CoreBottomWatcher {
         strategy: "core-bottom-watch",
         live: false,
         ts: now,
+        kind: "info",
       };
       await this.dispatcher.dispatch(alert);
     } else if (!result.triggered && this.alerting) {
