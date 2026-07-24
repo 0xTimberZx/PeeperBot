@@ -48,7 +48,11 @@ export interface EntryCheckResult {
   message: string;
 }
 
-export function evaluateEntry(candles: Candle[], params: Partial<EntryCheckParams> = {}): EntryCheckResult {
+export function evaluateEntry(
+  candles: Candle[],
+  params: Partial<EntryCheckParams> = {},
+  label = "Price"
+): EntryCheckResult {
   const p = { ...DEFAULT_ENTRY_CHECK_PARAMS, ...params };
   const closes = candles.map((c) => c.close);
   const need = p.volLookback + p.lookbackBars + 2;
@@ -116,7 +120,7 @@ export function evaluateEntry(candles: Candle[], params: Partial<EntryCheckParam
   }
 
   const message =
-    `BTC ${pct(movePct)} over last ${p.lookbackBars} bars · z=${z.toFixed(2)} (${level}${phase}).\n` +
+    `${label} ${pct(movePct)} over last ${p.lookbackBars} bars · z=${z.toFixed(2)} (${level}${phase}).\n` +
     `Enter UP = ${chaseUp ? "CHASE ⚠" : "ok"} · Enter DOWN = ${chaseDown ? "CHASE ⚠" : "ok"}.\n` +
     verdict;
 
