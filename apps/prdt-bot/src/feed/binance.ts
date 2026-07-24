@@ -25,7 +25,7 @@ export interface Candle {
 }
 
 /** Supported kline intervals (Binance-style strings; mapped per exchange). */
-export type Interval = "1m" | "3m" | "5m" | "15m" | "30m" | "1h";
+export type Interval = "1m" | "3m" | "5m" | "15m" | "30m" | "1h" | "4h" | "1d";
 
 /** Milliseconds in one candle of the given interval. */
 export function intervalMs(interval: Interval): number {
@@ -36,6 +36,8 @@ export function intervalMs(interval: Interval): number {
     "15m": 900_000,
     "30m": 1_800_000,
     "1h": 3_600_000,
+    "4h": 14_400_000,
+    "1d": 86_400_000,
   };
   return table[interval];
 }
@@ -105,6 +107,8 @@ const OKX_BAR: Record<Interval, string> = {
   "15m": "15m",
   "30m": "30m",
   "1h": "1H",
+  "4h": "4H",
+  "1d": "1D",
 };
 const okxSource: ExchangeSource = {
   name: "okx",
@@ -152,6 +156,8 @@ const BYBIT_INTERVAL: Record<Interval, string> = {
   "15m": "15",
   "30m": "30",
   "1h": "60",
+  "4h": "240",
+  "1d": "D",
 };
 const bybitSource: ExchangeSource = {
   name: "bybit",
