@@ -15,10 +15,19 @@ is measurable before any funds are risked.
 Quick start:
 
 ```bash
-npm install
+npm install                                               # REQUIRED once per fresh Codespace — installs tsx; skip it and every command dies with "tsx: not found"
 npm run bot:backtest -- --symbol BTCUSDT --candles 5000   # backtest on real candles
 npm run bot:run                                            # live signal loop (dry-run)
 npm run bot:report                                         # performance + counterfactual report
+```
+
+Every command runs from the **repo root** via a `bot:*` alias — no `--workspace`
+flag needed:
+
+```bash
+npm run bot:regime                     # macro radar: BrokerForce regime + new Core/BTC highs & lows
+npm run bot:watch                      # alert when CORE nears its multi-month pivot-low floor
+npm run bot:check -- --symbol BTCUSDT   # pre-entry "am I chasing, or is it coiled?" check
 ```
 
 **On "95/100":** PRDT Pro pays a fixed ~1.9×, so breakeven is ~52.6% and a
