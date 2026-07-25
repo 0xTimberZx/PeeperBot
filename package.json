@@ -13,7 +13,7 @@
     "bot:backtest": "npm run backtest --workspace=apps/prdt-bot --",
     "bot:run": "npm run run-live --workspace=apps/prdt-bot",
     "bot:report": "npm run report --workspace=apps/prdt-bot",
-    "bot:regime": "npm run regime --workspace=apps/prdt-bot",
+    "bot:regime": "npm run regime --workspace=apps/prdt-bot --",
     "bot:watch": "npm run watch --workspace=apps/prdt-bot",
     "bot:check": "npm run check --workspace=apps/prdt-bot --",
     "dev:web": "npm run dev --workspace=apps/web",
