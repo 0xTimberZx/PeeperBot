@@ -270,10 +270,16 @@ async function cmdRun(): Promise<void> {
   await engine.start();
 }
 
-async function cmdWatch(): Promise<void> {
+async function cmdWatch(flags: Map<string, string>): Promise<void> {
   const cfg = loadConfig();
   const dispatcher = buildDispatcher(cfg);
   const watcher = new CoreBottomWatcher(watchConfigFromEnv(cfg), dispatcher, cfg.timeframeMin);
+  // --once: a single evaluation against the persisted latch, then exit — the
+  // mode the scheduled GitHub Actions workflow runs.
+  if (flags.get("once") === "true") {
+    await watcher.runOnce();
+    return;
+  }
   const shutdown = () => {
     console.log("\n[watch] shutting down…");
     watcher.stop();
@@ -302,10 +308,16 @@ async function cmdCheck(flags: Map<string, string>): Promise<void> {
   );
 }
 
-async function cmdRegime(): Promise<void> {
+async function cmdRegime(flags: Map<string, string>): Promise<void> {
   const cfg = loadConfig();
   const dispatcher = buildDispatcher(cfg);
   const monitor = new RegimeMonitor(regimeConfigFromEnv(cfg), cfg, dispatcher, cfg.timeframeMin);
+  // --once: a single evaluation against the persisted snapshot, then exit. This
+  // is the mode the scheduled GitHub Actions workflow runs.
+  if (flags.get("once") === "true") {
+    await monitor.runOnce();
+    return;
+  }
   const shutdown = () => {
     console.log("\n[regime] shutting down…");
     monitor.stop();
@@ -340,13 +352,13 @@ async function main(): Promise<void> {
       await cmdRun();
       break;
     case "watch":
-      await cmdWatch();
+      await cmdWatch(flags);
       break;
     case "check":
       await cmdCheck(flags);
       break;
     case "regime":
-      await cmdRegime();
+      await cmdRegime(flags);
       break;
     case "report":
       await cmdReport();

@@ -1,0 +1,72 @@
+name: Regime watch
+
+# Always-on macro radar. Runs the regime monitor as a single "one-shot" tick on
+# a schedule (no Codespace required) and pushes a Telegram alert to your phone
+# only when something sizeable is NEW vs the last run: a BrokerForce vol-regime
+# shift, or a new Core / BTC / CORE-BTC-ratio high or low.
+#
+# State: the monitor diffs against the PREVIOUS snapshot. A fresh cron process
+# has no memory, so we persist data/regime-state.json between runs via the
+# actions/cache. First run (empty cache) just establishes the baseline.
+#
+# Setup (one-time): add two repository secrets under
+# Settings → Secrets and variables → Actions:
+#   TELEGRAM_BOT_TOKEN   — from @BotFather (use a FRESH token; the old one leaked)
+#   TELEGRAM_CHAT_ID     — from @userinfobot
+# Without them the workflow still runs and logs to the Actions console, but can't
+# reach your phone.
+
+on:
+  schedule:
+    # Every 30 minutes. GitHub schedules are best-effort and can lag 5–15 min
+    # under load — fine for a macro radar (this is not the minute-timing game).
+    - cron: "*/30 * * * *"
+  workflow_dispatch: {} # manual "Run workflow" button for an on-demand check
+
+# Only one regime tick at a time; never cancel an in-flight run mid-alert.
+concurrency:
+  group: regime-watch
+  cancel-in-progress: false
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # Restore the previous snapshot so this tick can diff against it. The key
+      # is unique per run (so every run saves a new entry); restore-keys pulls
+      # the most recent prior snapshot by prefix.
+      - name: Restore regime state
+        uses: actions/cache/restore@v4
+        with:
+          path: apps/prdt-bot/data/regime-state.json
+          key: regime-state-${{ github.run_id }}
+          restore-keys: |
+            regime-state-
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Regime tick (one-shot)
+        env:
+          # Binance geo-blocks GitHub runners (HTTP 451); start on OKX to skip
+          # the failed primary attempt. Both carry BTC and CORE.
+          FEED_SOURCE: okx
+          FEED_FALLBACKS: bybit
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: npm run regime --workspace=apps/prdt-bot -- --once
+
+      # Persist the snapshot this tick produced for the next run to diff against.
+      - name: Save regime state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: apps/prdt-bot/data/regime-state.json
+          key: regime-state-${{ github.run_id }}

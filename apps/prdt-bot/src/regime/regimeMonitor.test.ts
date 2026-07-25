@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { snapshotRegime, diffRegime } from "./regimeMonitor.js";
+import { snapshotRegime, diffRegime, ratioLean, type RegimeSnapshot } from "./regimeMonitor.js";
 import type { ExtremeReading } from "../analysis/extremes.js";
 import type { BrokerForceVolatility } from "../strategy/types.js";
 
@@ -70,5 +70,60 @@ describe("diffRegime", () => {
     const d = diffRegime(s, s);
     expect(d.alertWorthy).toBe(false);
     expect(d.events).toHaveLength(0);
+  });
+});
+
+// The scheduled (cron) watcher holds no in-memory previous snapshot — it diffs
+// against a snapshot persisted to disk between runs and round-tripped through
+// JSON by the Actions cache. These cases lock that cross-run behavior in.
+describe("regime diff across persisted runs (cron behavior)", () => {
+  it("first run (no persisted snapshot) is quiet when nothing is currently extreme", () => {
+    const cur = snapshotRegime({ btcRegime: null, coreRegime: null, btc: ext({}), core: ext({}), ratio: ext({}) });
+    const d = diffRegime(null, cur);
+    expect(d.alertWorthy).toBe(false);
+    expect(d.events).toHaveLength(0);
+  });
+
+  it("first run DOES report a state that is already at a new extreme", () => {
+    const cur = snapshotRegime({
+      btcRegime: null,
+      coreRegime: null,
+      btc: ext({}),
+      core: ext({ isNewLow: true, low: 80 }),
+      ratio: ext({ isNewLow: true, low: 0.015 }),
+    });
+    const d = diffRegime(null, cur);
+    expect(d.alertWorthy).toBe(true);
+    expect(d.events.some((e) => e.includes("CORE broke to a NEW LOW"))).toBe(true);
+    expect(d.events.some((e) => e.includes("CORE/BTC ratio broke to a NEW LOW"))).toBe(true);
+  });
+
+  it("a JSON-round-tripped prior snapshot suppresses a repeat of the same low", () => {
+    const prev: RegimeSnapshot = JSON.parse(
+      JSON.stringify(
+        snapshotRegime({ btcRegime: null, coreRegime: null, btc: ext({}), core: ext({ isNewLow: true, low: 80 }), ratio: ext({}) })
+      )
+    );
+    // Next tick: CORE still flags isNewLow but has NOT extended below the persisted 80.
+    const cur = snapshotRegime({ btcRegime: null, coreRegime: null, btc: ext({}), core: ext({ isNewLow: true, low: 80 }), ratio: ext({}) });
+    expect(diffRegime(prev, cur).alertWorthy).toBe(false);
+  });
+
+  it("a persisted prior snapshot still fires when the low EXTENDS further down", () => {
+    const prev: RegimeSnapshot = JSON.parse(
+      JSON.stringify(
+        snapshotRegime({ btcRegime: null, coreRegime: null, btc: ext({}), core: ext({ isNewLow: true, low: 80 }), ratio: ext({}) })
+      )
+    );
+    const cur = snapshotRegime({ btcRegime: null, coreRegime: null, btc: ext({}), core: ext({ isNewLow: true, low: 70 }), ratio: ext({}) });
+    const d = diffRegime(prev, cur);
+    expect(d.alertWorthy).toBe(true);
+    expect(d.events.some((e) => e.includes("CORE broke to a NEW LOW"))).toBe(true);
+  });
+
+  it("ratioLean reads a new ratio low as CORE weakness and a new high as strength", () => {
+    expect(ratioLean(ext({ isNewLow: true })).side).toBe("DOWN");
+    expect(ratioLean(ext({ isNewHigh: true })).side).toBe("UP");
+    expect(ratioLean(ext({})).side).toBe("NONE");
   });
 });

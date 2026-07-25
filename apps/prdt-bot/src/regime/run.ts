@@ -4,6 +4,8 @@
 // an alert only when the diff against the last check surfaces a sizeable, NEW
 // event — a macro heads-up, the opposite of the minute-timing game.
 
+import { readFileSync, writeFileSync, mkdirSync } from "fs";
+import { dirname } from "path";
 import { fetchHistory } from "../feed/binance.js";
 import type { BotConfig } from "../config.js";
 import { AlertDispatcher, type Alert } from "../alerts.js";
@@ -24,6 +26,9 @@ export interface RegimeLoopConfig {
   extremeLookbackBars: number; // how many days define a "new high/low"
   pollSeconds: number;
   diffParams: Partial<RegimeDiffParams>;
+  /** Where the last snapshot is persisted so a fresh process (e.g. a cron tick)
+   *  can diff against the prior run instead of re-baselining every time. */
+  statePath: string | null;
 }
 
 export class RegimeMonitor {
@@ -60,6 +65,7 @@ export class RegimeMonitor {
 
     const diff = diffRegime(this.prev, cur, this.cfg.diffParams);
     this.prev = cur;
+    this.persist();
 
     if (diff.alertWorthy) {
       const lean = ratioLean(cur.ratio);
@@ -82,7 +88,42 @@ export class RegimeMonitor {
     }
   }
 
+  /** Load the previous snapshot from disk (if any) so we diff across process
+   *  restarts. Best-effort: a missing/corrupt file just means a fresh baseline. */
+  private loadPrev(): void {
+    if (!this.cfg.statePath) return;
+    try {
+      this.prev = JSON.parse(readFileSync(this.cfg.statePath, "utf8")) as RegimeSnapshot;
+    } catch {
+      this.prev = null; // no prior state — first run
+    }
+  }
+
+  /** Write the current snapshot so the next process can diff against it. */
+  private persist(): void {
+    if (!this.cfg.statePath || !this.prev) return;
+    try {
+      mkdirSync(dirname(this.cfg.statePath), { recursive: true });
+      writeFileSync(this.cfg.statePath, JSON.stringify(this.prev, null, 2));
+    } catch (err) {
+      console.error("[regime] could not persist state:", (err as Error).message);
+    }
+  }
+
+  /** Single evaluation against the persisted snapshot, then exit. For scheduled
+   *  (cron) runs where no long-lived process holds the previous snapshot. */
+  async runOnce(): Promise<void> {
+    this.loadPrev();
+    console.log(
+      `[regime] one-shot · ${this.cfg.btcSymbol} + ${this.cfg.coreSymbol} · ` +
+        `${this.cfg.extremeLookbackBars}d extremes · brokerforce=${this.botCfg.brokerforce.databaseUrl ? "on" : "off"} · ` +
+        `state=${this.cfg.statePath ?? "none"} · alerts=[${this.dispatcher.channelNames.join(",")}]`
+    );
+    await this.tick(Date.now());
+  }
+
   async start(): Promise<void> {
+    this.loadPrev();
     this.running = true;
     console.log(
       `[regime] monitor up · ${this.cfg.btcSymbol} + ${this.cfg.coreSymbol} · ` +
@@ -116,7 +157,13 @@ export function regimeConfigFromEnv(cfg: BotConfig): RegimeLoopConfig {
     extremeLookbackBars: num("REGIME_EXTREME_DAYS", 90),
     pollSeconds: num("REGIME_POLL_SECONDS", 900),
     diffParams: { regimeDeltaZ: num("REGIME_DELTA_Z", 1.0) },
+    statePath: str("REGIME_STATE_PATH", "./data/regime-state.json"),
   };
+}
+
+function str(name: string, def: string): string {
+  const raw = process.env[name];
+  return raw && raw.trim() !== "" ? raw : def;
 }
 
 function sleep(ms: number, keepGoing: () => boolean): Promise<void> {
