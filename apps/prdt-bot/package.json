@@ -17,6 +17,7 @@
     "watch": "tsx src/cli.ts watch",
     "check": "tsx src/cli.ts check",
     "regime": "tsx src/cli.ts regime",
+    "track": "tsx src/cli.ts track",
     "report": "tsx src/cli.ts report",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit",
