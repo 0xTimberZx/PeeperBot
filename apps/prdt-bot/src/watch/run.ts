@@ -3,6 +3,8 @@
 // when CORE drops toward its floor. Alert delivery reuses the standard
 // dispatcher (console + Telegram/Discord if configured).
 
+import { readFileSync, writeFileSync, mkdirSync } from "fs";
+import { dirname } from "path";
 import { fetchKlines, fetchHistory, type Candle } from "../feed/binance.js";
 import type { BotConfig } from "../config.js";
 import { AlertDispatcher, type Alert } from "../alerts.js";
@@ -15,6 +17,9 @@ export interface WatchLoopConfig {
   pollSeconds: number;
   bandRefreshMin: number; // recompute the band this often
   params: Partial<WatchParams>;
+  /** Where the alert-latch is persisted so a fresh process (e.g. a cron tick)
+   *  doesn't re-fire every run while CORE sits in the bottom zone. */
+  statePath: string | null;
 }
 
 export class CoreBottomWatcher {
@@ -71,9 +76,46 @@ export class CoreBottomWatcher {
     } else if (!result.triggered) {
       console.log(`[watch] ${result.message}`);
     }
+    this.persist();
+  }
+
+  /** Load the latch from disk (if any) so the "one alert per episode" debounce
+   *  survives a process restart. Best-effort: missing/corrupt = start un-latched. */
+  private loadState(): void {
+    if (!this.cfg.statePath) return;
+    try {
+      const s = JSON.parse(readFileSync(this.cfg.statePath, "utf8")) as { alerting?: boolean };
+      this.alerting = s.alerting === true;
+    } catch {
+      this.alerting = false;
+    }
+  }
+
+  /** Persist the latch so the next process knows whether we're mid-episode. */
+  private persist(): void {
+    if (!this.cfg.statePath) return;
+    try {
+      mkdirSync(dirname(this.cfg.statePath), { recursive: true });
+      writeFileSync(this.cfg.statePath, JSON.stringify({ alerting: this.alerting }, null, 2));
+    } catch (err) {
+      console.error("[watch] could not persist state:", (err as Error).message);
+    }
+  }
+
+  /** Single evaluation against the persisted latch, then exit. For scheduled
+   *  (cron) runs where no long-lived process holds the debounce state. */
+  async runOnce(): Promise<void> {
+    this.loadState();
+    console.log(
+      `[watch] one-shot · core=${this.cfg.coreSymbol} btc=${this.cfg.btcSymbol} · ` +
+        `band=${this.cfg.lookbackDays}d daily · state=${this.cfg.statePath ?? "none"} · ` +
+        `alerts=[${this.dispatcher.channelNames.join(",")}]`
+    );
+    await this.tick(Date.now());
   }
 
   async start(): Promise<void> {
+    this.loadState();
     this.running = true;
     console.log(
       `[watch] CORE-bottom watch up · core=${this.cfg.coreSymbol} btc=${this.cfg.btcSymbol} · ` +
@@ -118,7 +160,13 @@ export function watchConfigFromEnv(cfg: BotConfig): WatchLoopConfig {
       // 0 = disabled: the pivot band is the primary, auto-adjusting floor.
       hardSupport: num("CORE_HARD_SUPPORT", 0),
     },
+    statePath: str("WATCH_STATE_PATH", "./data/watch-state.json"),
   };
+}
+
+function str(name: string, def: string): string {
+  const raw = process.env[name];
+  return raw && raw.trim() !== "" ? raw : def;
 }
 
 function sleep(ms: number, keepGoing: () => boolean): Promise<void> {

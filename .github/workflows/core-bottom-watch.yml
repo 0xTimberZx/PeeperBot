@@ -1,0 +1,70 @@
+name: CORE-bottom watch
+
+# Always-on floor watch. Runs the CORE-bottom watcher as a single "one-shot"
+# tick on a schedule (no Codespace required) and pushes a Telegram alert to your
+# phone when CORE drops toward its multi-month pivot-low band AND the drop looks
+# market-wide (BTC down too) — the cue to hunt a strong BTC reversal.
+#
+# State: the watcher fires ONCE per episode (a debounce latch), not every tick
+# while CORE sits in the zone. A fresh cron process has no memory of the latch,
+# so we persist data/watch-state.json between runs via the actions/cache.
+#
+# Setup (one-time): add two repository secrets under
+# Settings → Secrets and variables → Actions:
+#   TELEGRAM_BOT_TOKEN   — from @BotFather (use a FRESH token; the old one leaked)
+#   TELEGRAM_CHAT_ID     — from @userinfobot
+# Without them the workflow still runs and logs to the Actions console, but can't
+# reach your phone.
+
+on:
+  schedule:
+    # Every 30 minutes. This is a positional "get ready" alert, not an entry
+    # trigger, so schedule lag (5–15 min) is immaterial.
+    - cron: "*/30 * * * *"
+  workflow_dispatch: {} # manual "Run workflow" button for an on-demand check
+
+# Only one watch tick at a time; never cancel an in-flight run mid-alert.
+concurrency:
+  group: core-bottom-watch
+  cancel-in-progress: false
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # Restore the alert latch so this tick knows whether we're mid-episode.
+      - name: Restore watch state
+        uses: actions/cache/restore@v4
+        with:
+          path: apps/prdt-bot/data/watch-state.json
+          key: watch-state-${{ github.run_id }}
+          restore-keys: |
+            watch-state-
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Watch tick (one-shot)
+        env:
+          # Binance geo-blocks GitHub runners (HTTP 451); start on OKX to skip
+          # the failed primary attempt. Both carry BTC and CORE.
+          FEED_SOURCE: okx
+          FEED_FALLBACKS: bybit
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: npm run watch --workspace=apps/prdt-bot -- --once
+
+      # Persist the latch this tick produced for the next run.
+      - name: Save watch state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: apps/prdt-bot/data/watch-state.json
+          key: watch-state-${{ github.run_id }}
