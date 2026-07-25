@@ -256,6 +256,53 @@ it can't be win-rate-validated. It exists to bring *you* in at the moment your
 setup occurs; the trade decision stays yours. All thresholds are env-tunable
 (see `.env.example`).
 
+## Always-on phone alerts (scheduled GitHub Actions)
+
+Both radars run **24/7 with no Codespace open** via two scheduled workflows in
+[`.github/workflows/`](../../.github/workflows/). Each fires every 30 minutes and
+pushes a Telegram message to your phone only when there's something to say:
+
+| Workflow | File | Alerts when |
+|---|---|---|
+| **Regime watch** | `regime-watch.yml` | Core/BTC/ratio breaks a new high or low, or a BrokerForce vol-regime shifts |
+| **CORE-bottom watch** | `core-bottom-watch.yml` | CORE nears its multi-month pivot-low band **and** the drop is market-wide (BTC down too) |
+
+**Why a cron and not a long-running loop:** a Codespace suspends after ~30 min
+idle and kills any foreground process. Both monitors are also **stateful** — the
+regime monitor diffs each check against the previous snapshot, and the watch
+fires *once per episode* via a debounce latch. A fresh cron tick has no memory of
+either, so each run **persists its state** (`REGIME_STATE_PATH` /
+`WATCH_STATE_PATH`) and the workflow restores/saves it via the Actions cache
+between runs. The `--once` flag runs a single evaluation against that persisted
+state, then exits:
+
+```bash
+npm run bot:regime -- --once     # one tick, diff vs the saved snapshot, exit
+npm run bot:watch  -- --once     # one tick, respect the saved latch, exit
+```
+
+**One-time setup** — add two repository secrets (they're shared by both
+workflows) under **Settings → Secrets and variables → Actions**:
+
+| Secret | Where to get it |
+|---|---|
+| `TELEGRAM_BOT_TOKEN` | DM [@BotFather](https://t.me/BotFather) → `/newbot`. **Use a fresh token** — never reuse one that's been committed anywhere. |
+| `TELEGRAM_CHAT_ID` | DM [@userinfobot](https://t.me/userinfobot). Open your bot and tap **Start** once, or it can't message you. |
+
+Then merge to `main` (GitHub only runs schedules from the default branch). To
+test immediately without waiting, use **Actions → [workflow] → Run workflow**.
+Without the secrets the workflows still run and log to the Actions console, but
+can't reach your phone. The BrokerForce half stays off in CI unless you also add
+`BROKERFORCE_DATABASE_URL` as a secret (a read-only credential decision that's
+yours to make).
+
+**How to read them together:** these are positional *"get ready"* alerts, not
+entry triggers. The strongest setup is when **both** fire in the same window —
+CORE-bottom (price at the floor) confirmed by regime (the CORE/BTC ratio flushing
+to a new low market-wide). That's your cue to *look*, then run
+`npm run bot:check -- --symbol BTCUSDT` before any entry so you're not buying BTC
+into a local high while waiting for the reversal.
+
 ## Plugging in your own formula
 
 The whole engine is strategy-agnostic. To backtest your formula:
