@@ -1,0 +1,60 @@
+name: Entry autopsy (forward pin-test)
+
+# Forward test for the "price pins to my level" claim. Once a day it measures a
+# single, fixed entry — how much of the elapsed window price spent against you,
+# max adverse/favorable excursion, touches of your level, and the distance from
+# your entry to the pre-existing volume POC — all next to a RANDOM-ENTRY control
+# so "it floated above my entry" is checked against what any entry would do.
+# Pushes the day's line to Telegram.
+#
+# It is STATELESS: each run recomputes the whole window from the feed, so there's
+# no cache to manage. Keep the entry FIXED for the life of the experiment.
+#
+# Set the fill once, under Settings → Secrets and variables → Actions → Variables:
+#   TRACK_SYMBOL      e.g. HYPEUSDT
+#   TRACK_SIDE        short | long
+#   TRACK_ENTRY       your exact fill price, e.g. 59.0
+#   TRACK_ENTRY_TIME  UTC ISO, e.g. 2026-07-25T12:00:00Z
+#   TRACK_DAYS        experiment length, e.g. 7
+# (Telegram delivery reuses the same TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID
+# secrets as the other watchers.) Or trigger manually and type them in.
+
+on:
+  schedule:
+    - cron: "0 13 * * *" # once a day, 13:00 UTC
+  workflow_dispatch:
+    inputs:
+      symbol: { description: "Symbol (e.g. HYPEUSDT)", required: false }
+      side: { description: "short | long", required: false }
+      entry: { description: "Exact fill price", required: false }
+      time: { description: "UTC ISO entry time", required: false }
+      days: { description: "Experiment length in days", required: false }
+
+concurrency:
+  group: entry-autopsy
+  cancel-in-progress: false
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Autopsy tick
+        env:
+          FEED_SOURCE: okx
+          FEED_FALLBACKS: bybit
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          # workflow_dispatch inputs win; otherwise fall back to repo Variables.
+          TRACK_SYMBOL: ${{ github.event.inputs.symbol || vars.TRACK_SYMBOL }}
+          TRACK_SIDE: ${{ github.event.inputs.side || vars.TRACK_SIDE }}
+          TRACK_ENTRY: ${{ github.event.inputs.entry || vars.TRACK_ENTRY }}
+          TRACK_ENTRY_TIME: ${{ github.event.inputs.time || vars.TRACK_ENTRY_TIME }}
+          TRACK_DAYS: ${{ github.event.inputs.days || vars.TRACK_DAYS }}
+        run: npm run track --workspace=apps/prdt-bot -- --once

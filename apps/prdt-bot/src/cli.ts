@@ -22,6 +22,18 @@ import { LiveEngine } from "./engine/live.js";
 import { makeBrokerForceProvider } from "./brokerforce/volatility.js";
 import { CoreBottomWatcher, watchConfigFromEnv } from "./watch/run.js";
 import { evaluateEntry, verdictForSide } from "./analysis/entryCheck.js";
+import {
+  adverseFraction,
+  excursions,
+  bandTouches,
+  volumeProfile,
+  distanceToPocPct,
+  baselineAdverse,
+  percentileRank,
+  isAdverse,
+  mean,
+  type Side,
+} from "./analysis/entryAutopsy.js";
 import { RegimeMonitor, regimeConfigFromEnv } from "./regime/run.js";
 import { access, readFile } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
@@ -327,6 +339,114 @@ async function cmdRegime(flags: Map<string, string>): Promise<void> {
   await monitor.start();
 }
 
+async function cmdTrack(flags: Map<string, string>): Promise<void> {
+  const cfg = loadConfig();
+  const dispatcher = buildDispatcher(cfg);
+
+  // Flags override env (TRACK_*), so the same command serves ad-hoc runs and the
+  // scheduled workflow (which sets the fill via env).
+  const envOr = (flag: string, env: string) => flags.get(flag) ?? process.env[env];
+  const symbol = (envOr("symbol", "TRACK_SYMBOL") ?? cfg.symbols[0] ?? "BTCUSDT").toUpperCase();
+  const sideRaw = (envOr("side", "TRACK_SIDE") ?? "short").toLowerCase();
+  const side: Side = sideRaw === "long" || sideRaw === "buy" || sideRaw === "up" ? "long" : "short";
+  const entry = Number(envOr("entry", "TRACK_ENTRY"));
+  const timeRaw = envOr("time", "TRACK_ENTRY_TIME") ?? "";
+  const entryTime = Date.parse(timeRaw);
+  const days = Number(envOr("days", "TRACK_DAYS") ?? 7);
+  const bandPct = Number(envOr("band", "TRACK_BAND_PCT") ?? 0.005);
+
+  if (!Number.isFinite(entry) || entry <= 0) throw new Error("track: --entry <price> is required (a positive number)");
+  if (!Number.isFinite(entryTime)) throw new Error("track: --time <UTC ISO, e.g. 2026-07-25T12:00:00Z> is required");
+
+  const now = Date.now();
+  const hoursSinceEntry = Math.max(0, Math.ceil((now - entryTime) / 3_600_000));
+  const baselineBars = 60 * 24; // 60 days of 1h bars for the control + volume profile
+  const history = await fetchHistory({
+    symbol,
+    interval: "1h",
+    count: Math.min(2400, hoursSinceEntry + baselineBars + 2),
+  });
+
+  const windowEnd = entryTime + days * 24 * 3_600_000; // cap the test at the pre-declared length
+  const pre = history.filter((c) => c.openTime < entryTime); // strictly before the fill
+  const forward = history.filter((c) => c.openTime >= entryTime && c.openTime <= windowEnd);
+  const last = forward[forward.length - 1] ?? pre[pre.length - 1];
+  const price = last?.close ?? 0;
+
+  if (forward.length === 0) {
+    const msg = `No bars since your ${entryTime ? new Date(entryTime).toISOString() : "entry"} fill yet — nothing to measure. Re-run once the hour closes.`;
+    await emitTrack(dispatcher, flags, symbol, side, msg);
+    return;
+  }
+
+  // Forward stats (the trade, so far).
+  const adverse = adverseFraction(forward, entry, side);
+  const { maePct, mfePct } = excursions(forward, entry, side);
+  const touches = bandTouches(forward, entry, bandPct);
+  const adverseNow = isAdverse(price, entry, side);
+
+  // Control: how would a RANDOM same-side entry over the SAME elapsed length have
+  // fared? Measured on the pre-entry history so it's a true out-of-sample base rate.
+  const w = forward.length;
+  const baseline = baselineAdverse(pre, w, side, 6);
+  const baseMean = mean(baseline);
+  const pct = percentileRank(baseline, adverse);
+
+  // POC: did you enter AT the pre-existing magnet? (If so, revisits aren't personal.)
+  const { pocPrice } = volumeProfile(pre, 60);
+  const pocDist = distanceToPocPct(pre, entry, 60);
+
+  const pctStr = (x: number) => `${(x * 100).toFixed(1)}%`;
+  const dayFrac = (w / 24).toFixed(1);
+  const edgePp = (adverse - baseMean) * 100;
+  const verdict =
+    baseline.length < 20
+      ? "not enough history for a control read yet"
+      : pct >= 0.85
+        ? "UNUSUAL — spent more time against you than ~85%+ of random entries. Your timing, not the market."
+        : pct <= 0.15
+          ? "unusually FAVORABLE vs random — the opposite of pinned."
+          : "within the normal range — indistinguishable from a random entry (no pin, no curse).";
+
+  const lines = [
+    `📈 Entry autopsy · ${symbol} ${side.toUpperCase()} @ ${entry}`,
+    `Elapsed: ${dayFrac}d (${w} × 1h bars) · price now ${price} (${adverseNow ? "AGAINST you" : "in your favor"})`,
+    `Time against you: ${pctStr(adverse)}  vs random-entry baseline ${pctStr(baseMean)} (${edgePp >= 0 ? "+" : ""}${edgePp.toFixed(0)}pp, ${pctStr(pct)} pctile)`,
+    `Max adverse move: ${pctStr(maePct)} · max favorable: ${pctStr(mfePct)}`,
+    `Touches of your level (±${pctStr(bandPct)}): ${touches}`,
+    `Pre-entry POC (real magnet): ${pocPrice.toPrecision(6)} · your entry is ${pctStr(pocDist)} from it`,
+    `→ ${verdict}`,
+  ];
+  await emitTrack(dispatcher, flags, symbol, side, lines.join("\n"));
+}
+
+/** Print to console, or (with --alert/--once) push through the dispatcher as an
+ *  info alert — the mode the scheduled daily workflow runs. */
+async function emitTrack(
+  dispatcher: AlertDispatcher,
+  flags: Map<string, string>,
+  symbol: string,
+  side: Side,
+  body: string
+): Promise<void> {
+  if (flags.get("alert") === "true" || flags.get("once") === "true") {
+    await dispatcher.dispatch({
+      symbol,
+      timeframeMin: 0,
+      direction: side === "short" ? "DOWN" : "UP",
+      confidence: 0,
+      entryPrice: 0,
+      reason: body,
+      strategy: "entry-autopsy",
+      live: false,
+      ts: Date.now(),
+      kind: "info",
+    });
+  } else {
+    console.log("\n" + body + "\n");
+  }
+}
+
 async function cmdReport(): Promise<void> {
   const cfg = loadConfig();
   const journal = new JsonlJournal(cfg.journalPath);
@@ -360,6 +480,9 @@ async function main(): Promise<void> {
     case "regime":
       await cmdRegime(flags);
       break;
+    case "track":
+      await cmdTrack(flags);
+      break;
     case "report":
       await cmdReport();
       break;
@@ -378,6 +501,8 @@ async function main(): Promise<void> {
           `  peeperbot watch     # CORE-bottom watch: alert to hunt a BTC reversal when CORE nears its 6-mo floor\n` +
           `  peeperbot check     [--symbol BTCUSDT] [--side UP|DOWN]  # "am I chasing?" — pre-entry timing mirror\n` +
           `  peeperbot regime    # macro monitor: BrokerForce regime shifts + new Core/BTC/ratio highs & lows\n` +
+          `  peeperbot track     --symbol HYPEUSDT --side short --entry 59.0 --time 2026-07-25T12:00:00Z [--days 7]\n` +
+          `                     # forward "does price pin to my level?" test — your trade vs a random-entry control\n` +
           `  peeperbot report    # performance report from the journal\n\n` +
           `Strategies: ${listStrategies().join(", ")}\n`
       );
