@@ -42,8 +42,29 @@ import {
   type Side as PosSide,
 } from "./watch/positionWatch.js";
 import { access, readFile } from "node:fs/promises";
-import { constants as fsConstants } from "node:fs";
+import { constants as fsConstants, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+
+/** Load the poswatch per-level latch (labels already alerted this episode). */
+function loadLatched(statePath: string): string[] {
+  try {
+    const s = JSON.parse(readFileSync(statePath, "utf8")) as { latched?: string[] };
+    return Array.isArray(s.latched) ? s.latched : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Persist the current set of in-play level labels for the next cron tick. */
+function saveLatched(statePath: string, labels: string[]): void {
+  try {
+    mkdirSync(dirname(statePath), { recursive: true });
+    writeFileSync(statePath, JSON.stringify({ latched: labels }, null, 2));
+  } catch (err) {
+    console.error("[poswatch] could not persist state:", (err as Error).message);
+  }
+}
 
 async function ensureFileReadable(path: string): Promise<void> {
   try {
@@ -509,15 +530,21 @@ async function cmdPosWatch(flags: Map<string, string>): Promise<void> {
   }
 
   const interval = (flags.get("interval") ?? "15m") as Interval;
-  const evalOnce = async () => {
+
+  // --once: single evaluation against a persisted per-level latch, then exit —
+  // the mode the scheduled workflow runs. The latch means the cron fires when a
+  // level FIRST comes into play and stays quiet while price sits there, but a
+  // different level entering the zone (e.g. later the stop) still alerts.
+  if (flags.get("once") === "true") {
+    const statePath = flags.get("state") ?? process.env.POS_STATE_PATH ?? "./data/poswatch-state.json";
     const candles = await fetchKlines({ symbol: spec.symbol, interval, limit: 60 });
     const res = evaluatePosition(candles, spec, 3);
-    if (res.triggered) await emit(res.body);
-    else console.log(`[poswatch] quiet · ${res.body.split("\n").slice(1).join(" ")}`);
-  };
-
-  if (flags.get("once") === "true") {
-    await evalOnce();
+    const active = res.hits.filter((h) => h.heading === "toward").map((h) => h.label);
+    const prev = loadLatched(statePath);
+    const fresh = active.filter((l) => !prev.includes(l));
+    if (fresh.length > 0) await emit(res.body);
+    else console.log(`[poswatch] no new level in play · active=[${active.join(",")}] · price ${res.price}`);
+    saveLatched(statePath, active);
     return;
   }
 
