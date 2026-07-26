@@ -493,6 +493,17 @@ async function cmdPosWatch(flags: Map<string, string>): Promise<void> {
   // --test: send a canned sample so you can confirm the ping lands on your phone.
   // No feed call, so it works even where the exchange APIs are blocked.
   if (flags.get("test") === "true") {
+    const channels = dispatcher.channelNames;
+    console.log(`\n[poswatch] active alert channels: [${channels.join(", ")}]`);
+    if (!channels.includes("telegram")) {
+      console.log(
+        "[poswatch] ⚠️  Telegram is NOT configured — this will only print here, not reach your phone.\n" +
+          "           Add TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID to apps/prdt-bot/.env, then re-run.\n" +
+          "           (Token: DM @BotFather → /newbot. Chat id: DM @userinfobot. Then open your bot and tap Start.)"
+      );
+    } else {
+      console.log("[poswatch] Telegram configured ✓ — a copy of the message below should hit your phone.");
+    }
     await emit(sampleBody(spec));
     return;
   }
