@@ -1,5 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { evaluatePosition, momentum, leanText, sampleBody, type PositionSpec } from "./positionWatch.js";
+import {
+  evaluatePosition,
+  momentum,
+  leanText,
+  sampleBody,
+  evaluateProfitGuard,
+  favorableMove,
+  type PositionSpec,
+  type ProfitGuardState,
+} from "./positionWatch.js";
 import type { Candle } from "../feed/binance.js";
 
 function c(close: number): Candle {
@@ -70,5 +79,49 @@ describe("sampleBody", () => {
     const body = sampleBody(spec);
     expect(body).toContain("BTCUSDT SHORT @ 64,487");
     expect(body).toContain("Delivery test");
+  });
+});
+
+describe("profit give-back guard", () => {
+  const be = 64487; // breakeven for a short
+  const guardParams = { armPct: 0.0025, givebackFrac: 0.5 };
+
+  it("favorableMove is positive when a short is in profit", () => {
+    expect(favorableMove(64000, be, "short")).toBeCloseTo(487);
+    expect(favorableMove(65000, be, "short")).toBeLessThan(0);
+  });
+
+  it("does not fire before profit reaches the arm threshold", () => {
+    // barely in profit (<0.25%), so never armed
+    const candles = [c(64450), c(64440), c(64445), c(64450)];
+    const r = evaluateProfitGuard(candles, be, "short", null, 1, guardParams);
+    expect(r.state.armed).toBe(false);
+    expect(r.fired).toBe(false);
+  });
+
+  it("fires once armed, momentum pivots up, and half the peak is handed back", () => {
+    // Peak profit ~0.6% (price 64100), now bounced back to 64300 (gave back >50%)
+    // with up-momentum (adverse to a short).
+    const prev: ProfitGuardState = { breakeven: be, peakFav: be - 64100, armed: true };
+    const candles = [c(64100), c(64180), c(64260), c(64300)]; // climbing back = adverse
+    const r = evaluateProfitGuard(candles, be, "short", prev, 1, guardParams);
+    expect(r.fired).toBe(true);
+    expect(r.body).toContain("Profit fading");
+  });
+
+  it("does NOT fire while the winner is still running (favorable momentum)", () => {
+    const prev: ProfitGuardState = { breakeven: be, peakFav: be - 64200, armed: true };
+    const candles = [c(64300), c(64250), c(64180), c(64100)]; // still dropping = favorable to a short
+    const r = evaluateProfitGuard(candles, be, "short", prev, 1, guardParams);
+    expect(r.fired).toBe(false);
+  });
+
+  it("resets the peak when the breakeven changes (a re-entry)", () => {
+    const prev: ProfitGuardState = { breakeven: 65000, peakFav: 800, armed: true };
+    const candles = [c(64450), c(64460), c(64470), c(64480)];
+    const r = evaluateProfitGuard(candles, be, "short", prev, 1, guardParams);
+    // old peak (against 65000) is discarded; new peak measured against 64487
+    expect(r.state.breakeven).toBe(be);
+    expect(r.state.peakFav).toBeLessThan(800);
   });
 });

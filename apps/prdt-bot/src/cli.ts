@@ -37,8 +37,11 @@ import {
 import { RegimeMonitor, regimeConfigFromEnv } from "./regime/run.js";
 import {
   evaluatePosition,
+  evaluateProfitGuard,
   sampleBody,
   type PositionSpec,
+  type ProfitGuardParams,
+  type ProfitGuardState,
   type Side as PosSide,
 } from "./watch/positionWatch.js";
 import { access, readFile } from "node:fs/promises";
@@ -46,21 +49,26 @@ import { constants as fsConstants, readFileSync, writeFileSync, mkdirSync } from
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-/** Load the poswatch per-level latch (labels already alerted this episode). */
-function loadLatched(statePath: string): string[] {
+interface PosState {
+  latched: string[]; // level labels already alerted this episode
+  guard: ProfitGuardState | null; // profit give-back peak/armed state
+}
+
+/** Load the poswatch persisted state (per-level latch + profit-guard peak). */
+function loadPosState(statePath: string): PosState {
   try {
-    const s = JSON.parse(readFileSync(statePath, "utf8")) as { latched?: string[] };
-    return Array.isArray(s.latched) ? s.latched : [];
+    const s = JSON.parse(readFileSync(statePath, "utf8")) as Partial<PosState>;
+    return { latched: Array.isArray(s.latched) ? s.latched : [], guard: s.guard ?? null };
   } catch {
-    return [];
+    return { latched: [], guard: null };
   }
 }
 
-/** Persist the current set of in-play level labels for the next cron tick. */
-function saveLatched(statePath: string, labels: string[]): void {
+/** Persist the latch + guard state for the next cron tick. */
+function savePosState(statePath: string, state: PosState): void {
   try {
     mkdirSync(dirname(statePath), { recursive: true });
-    writeFileSync(statePath, JSON.stringify({ latched: labels }, null, 2));
+    writeFileSync(statePath, JSON.stringify(state, null, 2));
   } catch (err) {
     console.error("[poswatch] could not persist state:", (err as Error).message);
   }
@@ -497,6 +505,16 @@ async function cmdPosWatch(flags: Map<string, string>): Promise<void> {
   const dispatcher = buildDispatcher(cfg);
   const spec = positionSpecFrom(flags);
 
+  // Profit give-back guard: keys off your BLENDED breakeven (defaults to entry).
+  // --profit is a % favorable move that arms it (0.25 => a 0.25% move in your
+  // favor); --giveback is the fraction of the peak surrendered that fires it.
+  const envOrP = (flag: string, env: string) => flags.get(flag) ?? process.env[env];
+  const breakeven = Number(envOrP("breakeven", "POS_BREAKEVEN") ?? spec.entry);
+  const guardParams: ProfitGuardParams = {
+    armPct: Number(envOrP("profit", "POS_PROFIT_TARGET") ?? 0.25) / 100,
+    givebackFrac: Number(envOrP("giveback", "POS_GIVEBACK") ?? 0.5),
+  };
+
   const emit = (body: string) =>
     dispatcher.dispatch({
       symbol: spec.symbol,
@@ -538,13 +556,24 @@ async function cmdPosWatch(flags: Map<string, string>): Promise<void> {
   if (flags.get("once") === "true") {
     const statePath = flags.get("state") ?? process.env.POS_STATE_PATH ?? "./data/poswatch-state.json";
     const candles = await fetchKlines({ symbol: spec.symbol, interval, limit: 60 });
+    const st = loadPosState(statePath);
+
     const res = evaluatePosition(candles, spec, 3);
-    const active = res.hits.filter((h) => h.heading === "toward").map((h) => h.label);
-    const prev = loadLatched(statePath);
-    const fresh = active.filter((l) => !prev.includes(l));
-    if (fresh.length > 0) await emit(res.body);
-    else console.log(`[poswatch] no new level in play · active=[${active.join(",")}] · price ${res.price}`);
-    saveLatched(statePath, active);
+    const guard = evaluateProfitGuard(candles, breakeven, spec.side, st.guard, 3, guardParams);
+
+    // Combined per-label latch: approach levels heading toward, plus a synthetic
+    // "profit-guard" label when the give-back fires. Alert only on NEW labels.
+    const active = [
+      ...res.hits.filter((h) => h.heading === "toward").map((h) => h.label),
+      ...(guard.fired ? ["profit-guard"] : []),
+    ];
+    const isNew = (l: string) => !st.latched.includes(l);
+    if (res.hits.some((h) => h.heading === "toward" && isNew(h.label))) await emit(res.body);
+    if (guard.fired && isNew("profit-guard")) await emit(guard.body);
+    if (active.every((l) => !isNew(l))) {
+      console.log(`[poswatch] no new event · active=[${active.join(",")}] · price ${res.price} · profit ${(guard.profitPct * 100).toFixed(2)}%`);
+    }
+    savePosState(statePath, { latched: active, guard: guard.state });
     return;
   }
 
@@ -552,7 +581,9 @@ async function cmdPosWatch(flags: Map<string, string>): Promise<void> {
   // band; resets when the trigger clears.
   const pollSeconds = Number(flags.get("poll") ?? 60);
   let running = true;
-  let latched = false;
+  let latched = false; // zone-approach latch
+  let guardLatched = false; // profit give-back latch
+  let guardState: ProfitGuardState | null = null; // carries the running peak
   const shutdown = () => {
     console.log("\n[poswatch] shutting down…");
     running = false;
@@ -560,20 +591,33 @@ async function cmdPosWatch(flags: Map<string, string>): Promise<void> {
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
   console.log(
-    `[poswatch] up · ${spec.symbol} ${spec.side.toUpperCase()} @ ${spec.entry} · ` +
-      `limits [${spec.limits.join(",")}] · stop ${spec.stop} · alerts=[${dispatcher.channelNames.join(",")}]`
+    `[poswatch] up · ${spec.symbol} ${spec.side.toUpperCase()} @ ${spec.entry} · breakeven ${breakeven} · ` +
+      `limits [${spec.limits.join(",")}] · stop ${spec.stop} · profit-guard +${guardParams.armPct * 100}% · ` +
+      `alerts=[${dispatcher.channelNames.join(",")}]`
   );
   while (running) {
     try {
       const candles = await fetchKlines({ symbol: spec.symbol, interval, limit: 60 });
       const res = evaluatePosition(candles, spec, 3);
+      const guard = evaluateProfitGuard(candles, breakeven, spec.side, guardState, 3, guardParams);
+      guardState = guard.state;
+
       if (res.triggered && !latched) {
         latched = true;
         await emit(res.body);
       } else if (!res.triggered && latched) {
         latched = false; // zone cleared — re-arm
-      } else if (!res.triggered) {
-        console.log(`[poswatch] quiet · price ${res.price}`);
+      }
+
+      if (guard.fired && !guardLatched) {
+        guardLatched = true;
+        await emit(guard.body);
+      } else if (!guard.fired && guardLatched) {
+        guardLatched = false; // pivot passed — re-arm
+      }
+
+      if (!res.triggered && !guard.fired) {
+        console.log(`[poswatch] quiet · price ${res.price} · profit ${(guard.profitPct * 100).toFixed(2)}% (peak ${(guard.peakPct * 100).toFixed(2)}%)`);
       }
     } catch (err) {
       console.error("[poswatch] tick failed:", (err as Error).message);
@@ -643,6 +687,7 @@ async function main(): Promise<void> {
           `                     # forward "does price pin to my level?" test — your trade vs a random-entry control\n` +
           `  peeperbot poswatch  --symbol BTCUSDT --side short --entry 64487 --limits 65780,66500,68000 --stop 69100\n` +
           `                     # alert when price heads back into your position/limit zone (add --test to ping now)\n` +
+          `                     # + profit give-back guard: --breakeven 64487 --profit 0.25 --giveback 0.5\n` +
           `  peeperbot report    # performance report from the journal\n\n` +
           `Strategies: ${listStrategies().join(", ")}\n`
       );

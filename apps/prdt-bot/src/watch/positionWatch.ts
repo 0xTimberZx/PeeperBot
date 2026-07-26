@@ -161,6 +161,83 @@ function buildBody(
   return lines.join("\n");
 }
 
+// ── Profit give-back guard ──────────────────────────────────────────────────
+// Arms once the position is in profit by `armPct` (a favorable price move from
+// your breakeven), tracks the peak, and fires when momentum pivots against you
+// AND you've handed back `givebackFrac` of that peak — the "about to round-trip
+// my winner into a loss" moment. Keys off breakeven so it follows re-entries.
+
+export interface ProfitGuardParams {
+  armPct: number; // favorable move / breakeven that arms the guard (e.g. 0.0025 = 0.25%)
+  givebackFrac: number; // fraction of the peak profit surrendered that triggers (e.g. 0.5)
+}
+
+export const DEFAULT_GUARD_PARAMS: ProfitGuardParams = { armPct: 0.0025, givebackFrac: 0.5 };
+
+export interface ProfitGuardState {
+  breakeven: number; // the breakeven this peak was measured against (reset on change)
+  peakFav: number; // best favorable price-distance from breakeven since arming
+  armed: boolean;
+}
+
+export interface ProfitGuardResult {
+  state: ProfitGuardState;
+  fired: boolean;
+  profitPct: number; // current favorable move / breakeven (negative = in loss)
+  peakPct: number;
+  price: number;
+  body: string;
+}
+
+/** Signed profit distance: positive means the position is in the green. */
+export function favorableMove(price: number, breakeven: number, side: Side): number {
+  return side === "short" ? breakeven - price : price - breakeven;
+}
+
+export function evaluateProfitGuard(
+  candles: Candle[],
+  breakeven: number,
+  side: Side,
+  prev: ProfitGuardState | null,
+  momentumBars = 3,
+  params: ProfitGuardParams = DEFAULT_GUARD_PARAMS
+): ProfitGuardResult {
+  const price = candles[candles.length - 1]?.close ?? 0;
+  const fav = favorableMove(price, breakeven, side);
+  const favPct = breakeven > 0 ? fav / breakeven : 0;
+  const mom = momentum(candles, momentumBars);
+
+  // Carry the peak only if the breakeven is unchanged; a re-entry resets it.
+  const carry = prev && prev.breakeven === breakeven ? prev : null;
+  const peakFav = Math.max(carry?.peakFav ?? 0, fav);
+  const peakPct = breakeven > 0 ? peakFav / breakeven : 0;
+  const armed = (carry?.armed ?? false) || peakPct >= params.armPct;
+
+  const adverseMomentum = side === "short" ? mom.dir === "up" : mom.dir === "down";
+  const gaveBack = peakFav > 0 && fav <= peakFav * (1 - params.givebackFrac);
+  const stillNearProfit = fav > -params.armPct * breakeven; // not already deep in the red
+  const fired = armed && adverseMomentum && gaveBack && stillNearProfit;
+
+  const state: ProfitGuardState = { breakeven, peakFav, armed };
+  return { state, fired, profitPct: favPct, peakPct, price, body: buildGuardBody(side, breakeven, price, favPct, peakPct, mom) };
+}
+
+function buildGuardBody(
+  side: Side,
+  breakeven: number,
+  price: number,
+  favPct: number,
+  peakPct: number,
+  mom: Momentum
+): string {
+  const pivot = side === "short" ? "up" : "down";
+  return [
+    `⏳ Profit fading · ${side.toUpperCase()} · breakeven ${fmt(breakeven)}`,
+    `Peaked at +${pct(peakPct)}, now +${pct(Math.max(0, favPct))} at ${fmt(price)} — momentum just pivoted ${pivot} (${mom.decelerating ? "prior push exhausted" : "accelerating against you"}).`,
+    `It's rolling back toward your breakeven. Lock the win or tighten your stop before it round-trips into a loss.`,
+  ].join("\n");
+}
+
 /** A canned sample used by `poswatch --test` to prove phone delivery without a
  *  live feed — a representative "heading into your zone" alert. */
 export function sampleBody(spec: PositionSpec): string {
