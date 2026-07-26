@@ -10,7 +10,7 @@
 
 import { loadConfig, type BotConfig } from "./config.js";
 import { createStrategy, listStrategies } from "./strategy/registry.js";
-import { fetchHistory, fetchKlines, parseFixture, type Candle } from "./feed/binance.js";
+import { fetchHistory, fetchKlines, parseFixture, type Candle, type Interval } from "./feed/binance.js";
 import { runBacktest, alignedSignalProvider, type ExternalContextProvider } from "./engine/backtest.js";
 import { formatBacktest } from "./analysis/backtestFormat.js";
 import { detectAndProfile, formatProfile } from "./analysis/spikeProfile.js";
@@ -35,6 +35,12 @@ import {
   type Side,
 } from "./analysis/entryAutopsy.js";
 import { RegimeMonitor, regimeConfigFromEnv } from "./regime/run.js";
+import {
+  evaluatePosition,
+  sampleBody,
+  type PositionSpec,
+  type Side as PosSide,
+} from "./watch/positionWatch.js";
 import { access, readFile } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -447,6 +453,97 @@ async function emitTrack(
   }
 }
 
+function positionSpecFrom(flags: Map<string, string>): PositionSpec {
+  const envOr = (flag: string, env: string) => flags.get(flag) ?? process.env[env];
+  const symbol = (envOr("symbol", "POS_SYMBOL") ?? "BTCUSDT").toUpperCase();
+  const sideRaw = (envOr("side", "POS_SIDE") ?? "short").toLowerCase();
+  const side: PosSide = sideRaw === "long" || sideRaw === "buy" || sideRaw === "up" ? "long" : "short";
+  const entry = Number(envOr("entry", "POS_ENTRY"));
+  const stop = Number(envOr("stop", "POS_STOP"));
+  const limits = (envOr("limits", "POS_LIMITS") ?? "")
+    .split(",")
+    .map((s) => Number(s.trim()))
+    .filter((n) => Number.isFinite(n) && n > 0);
+  const proximityPct = Number(envOr("proximity", "POS_PROXIMITY") ?? 0.005);
+
+  if (!Number.isFinite(entry) || entry <= 0) throw new Error("poswatch: --entry <price> is required (a positive number)");
+  if (!Number.isFinite(stop) || stop <= 0) throw new Error("poswatch: --stop <price> is required (a positive number)");
+  return { symbol, side, entry, limits, stop, proximityPct };
+}
+
+async function cmdPosWatch(flags: Map<string, string>): Promise<void> {
+  const cfg = loadConfig();
+  const dispatcher = buildDispatcher(cfg);
+  const spec = positionSpecFrom(flags);
+
+  const emit = (body: string) =>
+    dispatcher.dispatch({
+      symbol: spec.symbol,
+      timeframeMin: 0,
+      direction: spec.side === "short" ? "DOWN" : "UP",
+      confidence: 0,
+      entryPrice: spec.entry,
+      reason: body,
+      strategy: "position-watch",
+      live: false,
+      ts: Date.now(),
+      kind: "info",
+    });
+
+  // --test: send a canned sample so you can confirm the ping lands on your phone.
+  // No feed call, so it works even where the exchange APIs are blocked.
+  if (flags.get("test") === "true") {
+    await emit(sampleBody(spec));
+    return;
+  }
+
+  const interval = (flags.get("interval") ?? "15m") as Interval;
+  const evalOnce = async () => {
+    const candles = await fetchKlines({ symbol: spec.symbol, interval, limit: 60 });
+    const res = evaluatePosition(candles, spec, 3);
+    if (res.triggered) await emit(res.body);
+    else console.log(`[poswatch] quiet · ${res.body.split("\n").slice(1).join(" ")}`);
+  };
+
+  if (flags.get("once") === "true") {
+    await evalOnce();
+    return;
+  }
+
+  // Live loop with a per-level latch so it doesn't re-fire while price sits in a
+  // band; resets when the trigger clears.
+  const pollSeconds = Number(flags.get("poll") ?? 60);
+  let running = true;
+  let latched = false;
+  const shutdown = () => {
+    console.log("\n[poswatch] shutting down…");
+    running = false;
+  };
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
+  console.log(
+    `[poswatch] up · ${spec.symbol} ${spec.side.toUpperCase()} @ ${spec.entry} · ` +
+      `limits [${spec.limits.join(",")}] · stop ${spec.stop} · alerts=[${dispatcher.channelNames.join(",")}]`
+  );
+  while (running) {
+    try {
+      const candles = await fetchKlines({ symbol: spec.symbol, interval, limit: 60 });
+      const res = evaluatePosition(candles, spec, 3);
+      if (res.triggered && !latched) {
+        latched = true;
+        await emit(res.body);
+      } else if (!res.triggered && latched) {
+        latched = false; // zone cleared — re-arm
+      } else if (!res.triggered) {
+        console.log(`[poswatch] quiet · price ${res.price}`);
+      }
+    } catch (err) {
+      console.error("[poswatch] tick failed:", (err as Error).message);
+    }
+    for (let i = 0; i < pollSeconds && running; i++) await new Promise((r) => setTimeout(r, 1000));
+  }
+}
+
 async function cmdReport(): Promise<void> {
   const cfg = loadConfig();
   const journal = new JsonlJournal(cfg.journalPath);
@@ -483,6 +580,9 @@ async function main(): Promise<void> {
     case "track":
       await cmdTrack(flags);
       break;
+    case "poswatch":
+      await cmdPosWatch(flags);
+      break;
     case "report":
       await cmdReport();
       break;
@@ -503,6 +603,8 @@ async function main(): Promise<void> {
           `  peeperbot regime    # macro monitor: BrokerForce regime shifts + new Core/BTC/ratio highs & lows\n` +
           `  peeperbot track     --symbol HYPEUSDT --side short --entry 59.0 --time 2026-07-25T12:00:00Z [--days 7]\n` +
           `                     # forward "does price pin to my level?" test — your trade vs a random-entry control\n` +
+          `  peeperbot poswatch  --symbol BTCUSDT --side short --entry 64487 --limits 65780,66500,68000 --stop 69100\n` +
+          `                     # alert when price heads back into your position/limit zone (add --test to ping now)\n` +
           `  peeperbot report    # performance report from the journal\n\n` +
           `Strategies: ${listStrategies().join(", ")}\n`
       );
