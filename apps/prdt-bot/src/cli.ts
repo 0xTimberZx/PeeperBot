@@ -10,7 +10,7 @@
 
 import { loadConfig, type BotConfig } from "./config.js";
 import { createStrategy, listStrategies } from "./strategy/registry.js";
-import { fetchHistory, fetchKlines, parseFixture, type Candle } from "./feed/binance.js";
+import { fetchHistory, fetchKlines, parseFixture, type Candle, type Interval } from "./feed/binance.js";
 import { runBacktest, alignedSignalProvider, type ExternalContextProvider } from "./engine/backtest.js";
 import { formatBacktest } from "./analysis/backtestFormat.js";
 import { detectAndProfile, formatProfile } from "./analysis/spikeProfile.js";
@@ -35,9 +35,44 @@ import {
   type Side,
 } from "./analysis/entryAutopsy.js";
 import { RegimeMonitor, regimeConfigFromEnv } from "./regime/run.js";
+import {
+  evaluatePosition,
+  evaluateProfitGuard,
+  sampleBody,
+  type PositionSpec,
+  type ProfitGuardParams,
+  type ProfitGuardState,
+  type Side as PosSide,
+} from "./watch/positionWatch.js";
 import { access, readFile } from "node:fs/promises";
-import { constants as fsConstants } from "node:fs";
+import { constants as fsConstants, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+
+interface PosState {
+  latched: string[]; // level labels already alerted this episode
+  guard: ProfitGuardState | null; // profit give-back peak/armed state
+}
+
+/** Load the poswatch persisted state (per-level latch + profit-guard peak). */
+function loadPosState(statePath: string): PosState {
+  try {
+    const s = JSON.parse(readFileSync(statePath, "utf8")) as Partial<PosState>;
+    return { latched: Array.isArray(s.latched) ? s.latched : [], guard: s.guard ?? null };
+  } catch {
+    return { latched: [], guard: null };
+  }
+}
+
+/** Persist the latch + guard state for the next cron tick. */
+function savePosState(statePath: string, state: PosState): void {
+  try {
+    mkdirSync(dirname(statePath), { recursive: true });
+    writeFileSync(statePath, JSON.stringify(state, null, 2));
+  } catch (err) {
+    console.error("[poswatch] could not persist state:", (err as Error).message);
+  }
+}
 
 async function ensureFileReadable(path: string): Promise<void> {
   try {
@@ -447,6 +482,150 @@ async function emitTrack(
   }
 }
 
+function positionSpecFrom(flags: Map<string, string>): PositionSpec {
+  const envOr = (flag: string, env: string) => flags.get(flag) ?? process.env[env];
+  const symbol = (envOr("symbol", "POS_SYMBOL") ?? "BTCUSDT").toUpperCase();
+  const sideRaw = (envOr("side", "POS_SIDE") ?? "short").toLowerCase();
+  const side: PosSide = sideRaw === "long" || sideRaw === "buy" || sideRaw === "up" ? "long" : "short";
+  const entry = Number(envOr("entry", "POS_ENTRY"));
+  const stop = Number(envOr("stop", "POS_STOP"));
+  const limits = (envOr("limits", "POS_LIMITS") ?? "")
+    .split(",")
+    .map((s) => Number(s.trim()))
+    .filter((n) => Number.isFinite(n) && n > 0);
+  const proximityPct = Number(envOr("proximity", "POS_PROXIMITY") ?? 0.005);
+
+  if (!Number.isFinite(entry) || entry <= 0) throw new Error("poswatch: --entry <price> is required (a positive number)");
+  if (!Number.isFinite(stop) || stop <= 0) throw new Error("poswatch: --stop <price> is required (a positive number)");
+  return { symbol, side, entry, limits, stop, proximityPct };
+}
+
+async function cmdPosWatch(flags: Map<string, string>): Promise<void> {
+  const cfg = loadConfig();
+  const dispatcher = buildDispatcher(cfg);
+  const spec = positionSpecFrom(flags);
+
+  // Profit give-back guard: keys off your BLENDED breakeven (defaults to entry).
+  // --profit is a % favorable move that arms it (0.25 => a 0.25% move in your
+  // favor); --giveback is the fraction of the peak surrendered that fires it.
+  const envOrP = (flag: string, env: string) => flags.get(flag) ?? process.env[env];
+  const breakeven = Number(envOrP("breakeven", "POS_BREAKEVEN") ?? spec.entry);
+  const guardParams: ProfitGuardParams = {
+    armPct: Number(envOrP("profit", "POS_PROFIT_TARGET") ?? 0.25) / 100,
+    givebackFrac: Number(envOrP("giveback", "POS_GIVEBACK") ?? 0.5),
+  };
+
+  const emit = (body: string) =>
+    dispatcher.dispatch({
+      symbol: spec.symbol,
+      timeframeMin: 0,
+      direction: spec.side === "short" ? "DOWN" : "UP",
+      confidence: 0,
+      entryPrice: spec.entry,
+      reason: body,
+      strategy: "position-watch",
+      live: false,
+      ts: Date.now(),
+      kind: "info",
+    });
+
+  // --test: send a canned sample so you can confirm the ping lands on your phone.
+  // No feed call, so it works even where the exchange APIs are blocked.
+  if (flags.get("test") === "true") {
+    const channels = dispatcher.channelNames;
+    console.log(`\n[poswatch] active alert channels: [${channels.join(", ")}]`);
+    if (!channels.includes("telegram")) {
+      console.log(
+        "[poswatch] ⚠️  Telegram is NOT configured — this will only print here, not reach your phone.\n" +
+          "           Add TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID to apps/prdt-bot/.env, then re-run.\n" +
+          "           (Token: DM @BotFather → /newbot. Chat id: DM @userinfobot. Then open your bot and tap Start.)"
+      );
+    } else {
+      console.log("[poswatch] Telegram configured ✓ — a copy of the message below should hit your phone.");
+    }
+    await emit(sampleBody(spec));
+    return;
+  }
+
+  const interval = (flags.get("interval") ?? "15m") as Interval;
+
+  // --once: single evaluation against a persisted per-level latch, then exit —
+  // the mode the scheduled workflow runs. The latch means the cron fires when a
+  // level FIRST comes into play and stays quiet while price sits there, but a
+  // different level entering the zone (e.g. later the stop) still alerts.
+  if (flags.get("once") === "true") {
+    const statePath = flags.get("state") ?? process.env.POS_STATE_PATH ?? "./data/poswatch-state.json";
+    const candles = await fetchKlines({ symbol: spec.symbol, interval, limit: 60 });
+    const st = loadPosState(statePath);
+
+    const res = evaluatePosition(candles, spec, 3);
+    const guard = evaluateProfitGuard(candles, breakeven, spec.side, st.guard, 3, guardParams);
+
+    // Combined per-label latch: approach levels heading toward, plus a synthetic
+    // "profit-guard" label when the give-back fires. Alert only on NEW labels.
+    const active = [
+      ...res.hits.filter((h) => h.heading === "toward").map((h) => h.label),
+      ...(guard.fired ? ["profit-guard"] : []),
+    ];
+    const isNew = (l: string) => !st.latched.includes(l);
+    if (res.hits.some((h) => h.heading === "toward" && isNew(h.label))) await emit(res.body);
+    if (guard.fired && isNew("profit-guard")) await emit(guard.body);
+    if (active.every((l) => !isNew(l))) {
+      console.log(`[poswatch] no new event · active=[${active.join(",")}] · price ${res.price} · profit ${(guard.profitPct * 100).toFixed(2)}%`);
+    }
+    savePosState(statePath, { latched: active, guard: guard.state });
+    return;
+  }
+
+  // Live loop with a per-level latch so it doesn't re-fire while price sits in a
+  // band; resets when the trigger clears.
+  const pollSeconds = Number(flags.get("poll") ?? 60);
+  let running = true;
+  let latched = false; // zone-approach latch
+  let guardLatched = false; // profit give-back latch
+  let guardState: ProfitGuardState | null = null; // carries the running peak
+  const shutdown = () => {
+    console.log("\n[poswatch] shutting down…");
+    running = false;
+  };
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
+  console.log(
+    `[poswatch] up · ${spec.symbol} ${spec.side.toUpperCase()} @ ${spec.entry} · breakeven ${breakeven} · ` +
+      `limits [${spec.limits.join(",")}] · stop ${spec.stop} · profit-guard +${guardParams.armPct * 100}% · ` +
+      `alerts=[${dispatcher.channelNames.join(",")}]`
+  );
+  while (running) {
+    try {
+      const candles = await fetchKlines({ symbol: spec.symbol, interval, limit: 60 });
+      const res = evaluatePosition(candles, spec, 3);
+      const guard = evaluateProfitGuard(candles, breakeven, spec.side, guardState, 3, guardParams);
+      guardState = guard.state;
+
+      if (res.triggered && !latched) {
+        latched = true;
+        await emit(res.body);
+      } else if (!res.triggered && latched) {
+        latched = false; // zone cleared — re-arm
+      }
+
+      if (guard.fired && !guardLatched) {
+        guardLatched = true;
+        await emit(guard.body);
+      } else if (!guard.fired && guardLatched) {
+        guardLatched = false; // pivot passed — re-arm
+      }
+
+      if (!res.triggered && !guard.fired) {
+        console.log(`[poswatch] quiet · price ${res.price} · profit ${(guard.profitPct * 100).toFixed(2)}% (peak ${(guard.peakPct * 100).toFixed(2)}%)`);
+      }
+    } catch (err) {
+      console.error("[poswatch] tick failed:", (err as Error).message);
+    }
+    for (let i = 0; i < pollSeconds && running; i++) await new Promise((r) => setTimeout(r, 1000));
+  }
+}
+
 async function cmdReport(): Promise<void> {
   const cfg = loadConfig();
   const journal = new JsonlJournal(cfg.journalPath);
@@ -483,6 +662,9 @@ async function main(): Promise<void> {
     case "track":
       await cmdTrack(flags);
       break;
+    case "poswatch":
+      await cmdPosWatch(flags);
+      break;
     case "report":
       await cmdReport();
       break;
@@ -503,6 +685,9 @@ async function main(): Promise<void> {
           `  peeperbot regime    # macro monitor: BrokerForce regime shifts + new Core/BTC/ratio highs & lows\n` +
           `  peeperbot track     --symbol HYPEUSDT --side short --entry 59.0 --time 2026-07-25T12:00:00Z [--days 7]\n` +
           `                     # forward "does price pin to my level?" test — your trade vs a random-entry control\n` +
+          `  peeperbot poswatch  --symbol BTCUSDT --side short --entry 64487 --limits 65780,66500,68000 --stop 69100\n` +
+          `                     # alert when price heads back into your position/limit zone (add --test to ping now)\n` +
+          `                     # + profit give-back guard: --breakeven 64487 --profit 0.25 --giveback 0.5\n` +
           `  peeperbot report    # performance report from the journal\n\n` +
           `Strategies: ${listStrategies().join(", ")}\n`
       );

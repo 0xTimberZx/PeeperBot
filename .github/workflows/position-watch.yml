@@ -1,0 +1,79 @@
+name: Position watch
+
+# Always-on watch on a position YOU hold (it never trades). Every ~15 minutes it
+# checks whether price is heading back into your entry / limit-ladder / stop zone
+# and pings Telegram — tagged reversion (momentum fading) vs real trend
+# (accelerating). Runs with no Codespace open.
+#
+# State: it alerts once per level per episode (a per-level latch). A fresh cron
+# process has no memory, so data/poswatch-state.json is persisted between runs
+# via the actions/cache.
+#
+# Set the position once, under Settings → Secrets and variables → Actions → Variables:
+#   POS_SYMBOL      e.g. BTCUSDT
+#   POS_SIDE        short | long
+#   POS_ENTRY       your exact entry, e.g. 64487
+#   POS_LIMITS      comma list behind entry, e.g. 65780,66500,68000
+#   POS_STOP        e.g. 69100
+#   POS_PROXIMITY   optional band, default 0.005 (0.5%)
+# (Telegram reuses the same TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID secrets.)
+# Update the Variables whenever your position changes; delete the cache entry to
+# reset the latch.
+
+on:
+  schedule:
+    - cron: "*/15 * * * *" # every 15 min — a heads-up cadence for a swing position
+  workflow_dispatch:
+    inputs:
+      symbol: { description: "Symbol", required: false }
+      side: { description: "short | long", required: false }
+      entry: { description: "Entry price", required: false }
+      limits: { description: "Comma list of limit levels", required: false }
+      stop: { description: "Stop price", required: false }
+
+concurrency:
+  group: position-watch
+  cancel-in-progress: false
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Restore latch
+        uses: actions/cache/restore@v4
+        with:
+          path: apps/prdt-bot/data/poswatch-state.json
+          key: poswatch-state-${{ github.run_id }}
+          restore-keys: |
+            poswatch-state-
+      - name: Install dependencies
+        run: npm ci
+      - name: Position tick (one-shot)
+        env:
+          FEED_SOURCE: okx
+          FEED_FALLBACKS: bybit
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          POS_SYMBOL: ${{ github.event.inputs.symbol || vars.POS_SYMBOL }}
+          POS_SIDE: ${{ github.event.inputs.side || vars.POS_SIDE }}
+          POS_ENTRY: ${{ github.event.inputs.entry || vars.POS_ENTRY }}
+          POS_LIMITS: ${{ github.event.inputs.limits || vars.POS_LIMITS }}
+          POS_STOP: ${{ github.event.inputs.stop || vars.POS_STOP }}
+          POS_PROXIMITY: ${{ vars.POS_PROXIMITY }}
+          # Profit give-back guard (optional): blended breakeven + the profit %
+          # that arms it + how much of the peak given back fires it.
+          POS_BREAKEVEN: ${{ vars.POS_BREAKEVEN }}
+          POS_PROFIT_TARGET: ${{ vars.POS_PROFIT_TARGET }}
+          POS_GIVEBACK: ${{ vars.POS_GIVEBACK }}
+        run: npm run poswatch --workspace=apps/prdt-bot -- --once
+      - name: Save latch
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: apps/prdt-bot/data/poswatch-state.json
+          key: poswatch-state-${{ github.run_id }}
