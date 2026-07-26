@@ -390,6 +390,12 @@ async function cmdTrack(flags: Map<string, string>): Promise<void> {
   const days = Number(envOr("days", "TRACK_DAYS") ?? 7);
   const bandPct = Number(envOr("band", "TRACK_BAND_PCT") ?? 0.005);
 
+  // Scheduled cron with no experiment armed yet: no-op cleanly instead of failing.
+  const runningOnce = flags.get("once") === "true" || flags.get("alert") === "true";
+  if (runningOnce && (!Number.isFinite(entry) || entry <= 0 || !Number.isFinite(entryTime))) {
+    console.log("[track] not configured — set TRACK_ENTRY and TRACK_ENTRY_TIME (repo Variables) to arm. Skipping.");
+    return;
+  }
   if (!Number.isFinite(entry) || entry <= 0) throw new Error("track: --entry <price> is required (a positive number)");
   if (!Number.isFinite(entryTime)) throw new Error("track: --time <UTC ISO, e.g. 2026-07-25T12:00:00Z> is required");
 
@@ -503,6 +509,20 @@ function positionSpecFrom(flags: Map<string, string>): PositionSpec {
 async function cmdPosWatch(flags: Map<string, string>): Promise<void> {
   const cfg = loadConfig();
   const dispatcher = buildDispatcher(cfg);
+
+  // Scheduled cron with no position configured yet: no-op cleanly (exit 0) so an
+  // unarmed watcher doesn't fail the job and email you. Manual runs still error.
+  if (flags.get("once") === "true") {
+    const val = (flag: string, env: string) => Number(flags.get(flag) ?? process.env[env]);
+    const missing: string[] = [];
+    if (!(val("entry", "POS_ENTRY") > 0)) missing.push("POS_ENTRY");
+    if (!(val("stop", "POS_STOP") > 0)) missing.push("POS_STOP");
+    if (missing.length > 0) {
+      console.log(`[poswatch] not configured — set ${missing.join(", ")} (repo Variables) to arm. Skipping.`);
+      return;
+    }
+  }
+
   const spec = positionSpecFrom(flags);
 
   // Profit give-back guard: keys off your BLENDED breakeven (defaults to entry).
