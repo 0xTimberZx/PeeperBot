@@ -40,6 +40,7 @@ import { PrdtTradeStore } from "./journal/prdtStore.js";
 import {
   evaluateTrade,
   aggregate,
+  classifyVolume,
   type PrdtTrade,
   type TradeResult,
   type Dir,
@@ -747,12 +748,25 @@ async function cmdAutopsy(flags: Map<string, string>): Promise<void> {
     return;
   }
 
+  const BASELINE_MIN = 20; // minutes of pre-entry tape for the volume baseline
   const results: TradeResult[] = [];
   for (const t of trades) {
     try {
-      const path = await fetchKlines({ symbol: t.symbol, interval: "1m", startTime: t.ts, limit: t.expiryMin + 2 });
+      // One fetch spanning [entry - baseline, entry + expiry]: the pre-entry bars
+      // set the volume baseline, the entry bar its spike/quiet, the rest the path.
+      const bars = await fetchKlines({
+        symbol: t.symbol,
+        interval: "1m",
+        startTime: t.ts - BASELINE_MIN * 60_000,
+        limit: BASELINE_MIN + t.expiryMin + 2,
+      });
+      const pre = bars.filter((c) => c.openTime < t.ts);
+      const path = bars.filter((c) => c.openTime >= t.ts);
+      const baselineAvg = pre.length ? pre.reduce((a, c) => a + c.volume, 0) / pre.length : 0;
+      const entryVolume = path[0]?.volume ?? 0;
+      const entryVol = classifyVolume(entryVolume, baselineAvg);
       const volDay = await volDayFor(t);
-      results.push(evaluateTrade(t, path, volDay));
+      results.push(evaluateTrade(t, path, volDay, entryVol));
     } catch (err) {
       console.error(`[autopsy] ${t.id} (${t.symbol}) failed: ${(err as Error).message}`);
     }
@@ -774,7 +788,7 @@ async function cmdAutopsy(flags: Map<string, string>): Promise<void> {
       r.reaction !== "n/a" ? r.reaction : "",
     ].filter(Boolean);
     console.log(
-      `\n  ${r.dir} @ ${r.entry} · ${r.expiryMin}m · ${r.session} · vol:${r.volDay}` +
+      `\n  ${r.dir} @ ${r.entry} · ${r.expiryMin}m · ${r.session} · day:${r.volDay} · entry-vol:${r.entryVol}` +
         `\n    settle ${r.settle ?? "—"} → ${tags.join(" · ")}` +
         `\n    MFE +${p1(r.maxFavorablePct)}${r.peakProfitMin !== null ? ` @${r.peakProfitMin}m` : ""} · MAE ${p1(r.maxAdversePct)}`
     );
@@ -795,6 +809,7 @@ async function cmdAutopsy(flags: Map<string, string>): Promise<void> {
         line("By expiry", a.byExpiry),
         line("By reaction", a.byReaction),
         line("By vol day", a.byVolDay),
+        line("By entry vol", a.byEntryVol),
       ].filter(Boolean).join("\n") +
       `\n═════════════════════════════════`
   );

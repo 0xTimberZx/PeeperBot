@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { evaluateTrade, aggregate, sessionOf, classifyReaction, type PrdtTrade } from "./prdtJournal.js";
+import { evaluateTrade, aggregate, sessionOf, classifyReaction, classifyVolume, type PrdtTrade } from "./prdtJournal.js";
 import type { Candle } from "../feed/binance.js";
 
 function c(close: number, high = close, low = close): Candle {
@@ -82,10 +82,19 @@ describe("classifyReaction", () => {
   });
 });
 
+describe("classifyVolume", () => {
+  it("labels the entry as spike / normal / quiet vs the baseline", () => {
+    expect(classifyVolume(200, 100)).toBe("spike"); // 2.0x >= 1.8
+    expect(classifyVolume(100, 100)).toBe("normal");
+    expect(classifyVolume(40, 100)).toBe("quiet"); // 0.4x <= 0.6
+    expect(classifyVolume(50, 0)).toBe("unknown"); // no baseline
+  });
+});
+
 describe("aggregate", () => {
-  it("computes win rate and slices by dimension", () => {
-    const win = evaluateTrade(base({ id: "a" }), [c(100), c(101), c(102), c(103)]);
-    const loss = evaluateTrade(base({ id: "b" }), [c(100), c(101), c(100.5), c(99)]);
+  it("computes win rate and slices by dimension incl. entry volume", () => {
+    const win = evaluateTrade(base({ id: "a" }), [c(100), c(101), c(102), c(103)], "rising", "spike");
+    const loss = evaluateTrade(base({ id: "b" }), [c(100), c(101), c(100.5), c(99)], "lower", "quiet");
     const a = aggregate([win, loss]);
     expect(a.wins).toBe(1);
     expect(a.losses).toBe(1);
@@ -93,5 +102,7 @@ describe("aggregate", () => {
     expect(a.byDir["UP"]!.n).toBe(2);
     expect(a.bySession["NY"]!.n).toBe(2);
     expect(a.byExpiry["3m"]!.wins).toBe(1);
+    expect(a.byEntryVol["spike"]!.wins).toBe(1);
+    expect(a.byEntryVol["quiet"]!.n).toBe(1);
   });
 });

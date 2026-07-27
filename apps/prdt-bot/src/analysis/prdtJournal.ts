@@ -11,6 +11,7 @@ export type Dir = "UP" | "DOWN";
 export type Session = "Asia" | "London" | "NY";
 export type Reaction = "pivot" | "breakout" | "n/a";
 export type VolDay = "rising" | "lower" | "unknown";
+export type EntryVol = "spike" | "normal" | "quiet" | "unknown";
 
 /** One logged trade. Outcome is NOT stored — always recomputed from price. */
 export interface PrdtTrade {
@@ -26,8 +27,21 @@ export interface PrdtTrade {
 
 export interface TradeParams {
   breakoutPct: number; // push beyond the wall that counts as a breakout (e.g. 0.0015)
+  spikeMult: number; // entry-window volume >= this × baseline = a spike (e.g. 1.8)
+  quietMult: number; // entry-window volume <= this × baseline = quiet (e.g. 0.6)
 }
-export const DEFAULT_TRADE_PARAMS: TradeParams = { breakoutPct: 0.0015 };
+export const DEFAULT_TRADE_PARAMS: TradeParams = { breakoutPct: 0.0015, spikeMult: 1.8, quietMult: 0.6 };
+
+/** Was the entry placed into a volume spike, a normal tape, or a quiet one?
+ *  `entryVolume` is the entry bar's volume; `baselineAvg` the trailing average
+ *  just before it. Breakouts tend to ride spikes; holds form as volume fades. */
+export function classifyVolume(entryVolume: number, baselineAvg: number, params: TradeParams = DEFAULT_TRADE_PARAMS): EntryVol {
+  if (!(baselineAvg > 0)) return "unknown";
+  const r = entryVolume / baselineAvg;
+  if (r >= params.spikeMult) return "spike";
+  if (r <= params.quietMult) return "quiet";
+  return "normal";
+}
 
 export interface TradeResult {
   id: string;
@@ -47,6 +61,7 @@ export interface TradeResult {
   reaction: Reaction; // pivot (held) vs breakout (spiked through) at the wall
   session: Session;
   volDay: VolDay;
+  entryVol: EntryVol; // spike / normal / quiet at the moment of entry
 }
 
 /** UTC hour -> trading session. Convention (non-overlapping):
@@ -72,6 +87,7 @@ export function evaluateTrade(
   trade: PrdtTrade,
   path: Candle[],
   volDay: VolDay = "unknown",
+  entryVol: EntryVol = "unknown",
   params: TradeParams = DEFAULT_TRADE_PARAMS
 ): TradeResult {
   const { entry, dir, expiryMin } = trade;
@@ -113,7 +129,7 @@ export function evaluateTrade(
     id: trade.id, dir, entry, expiryMin, settle, result,
     timeInLossPct, maxFavorablePct: maxFav, maxAdversePct: maxAdv,
     peakProfitMin: peakMin, shortestWinMin: shortestWin, couldShorten, wonUgly, lostPretty,
-    reaction, session, volDay,
+    reaction, session, volDay, entryVol,
   };
 }
 
@@ -143,6 +159,7 @@ export interface Aggregate {
   byExpiry: Record<string, Bucket>;
   byReaction: Record<string, Bucket>;
   byVolDay: Record<string, Bucket>;
+  byEntryVol: Record<string, Bucket>;
 }
 
 function bucketPush(map: Record<string, Bucket>, key: string, win: boolean, counts: boolean): void {
@@ -156,7 +173,7 @@ export function aggregate(results: TradeResult[]): Aggregate {
   const agg: Aggregate = {
     n: results.length, wins: 0, losses: 0, pushes: 0, open: 0, winRate: 0,
     couldShorten: 0, wonUgly: 0, lostPretty: 0,
-    byDir: {}, bySession: {}, byExpiry: {}, byReaction: {}, byVolDay: {},
+    byDir: {}, bySession: {}, byExpiry: {}, byReaction: {}, byVolDay: {}, byEntryVol: {},
   };
   for (const r of results) {
     if (r.result === "WIN") agg.wins++;
@@ -173,6 +190,7 @@ export function aggregate(results: TradeResult[]): Aggregate {
     bucketPush(agg.byExpiry, `${r.expiryMin}m`, win, counts);
     bucketPush(agg.byReaction, r.reaction, win, counts);
     bucketPush(agg.byVolDay, r.volDay, win, counts);
+    bucketPush(agg.byEntryVol, r.entryVol, win, counts);
   }
   agg.winRate = settled.length ? agg.wins / settled.length : 0;
   return agg;
