@@ -18,6 +18,7 @@
     "bot:check": "npm run check --workspace=apps/prdt-bot --",
     "bot:track": "npm run track --workspace=apps/prdt-bot --",
     "bot:poswatch": "npm run poswatch --workspace=apps/prdt-bot --",
+    "bot:vprofile": "npm run vprofile --workspace=apps/prdt-bot --",
     "dev:web": "npm run dev --workspace=apps/web",
     "dev:api": "npm run dev --workspace=apps/api",
     "migrate": "npm run migrate --workspace=packages/db",

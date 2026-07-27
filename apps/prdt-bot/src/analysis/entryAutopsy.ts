@@ -112,6 +112,30 @@ export function distanceToPocPct(candles: Candle[], entry: number, binCount = 50
   return Math.abs(entry - pocPrice) / entry;
 }
 
+/** The top-N highest-volume price nodes (HVNs) — the major "magnet" levels.
+ *  Bins are ranked by traded volume; a node is skipped if it sits within
+ *  `minSepPct` of an already-picked higher node, so the result is N distinct
+ *  levels rather than N adjacent bins of the same shelf. */
+export function topVolumeNodes(
+  candles: Candle[],
+  binCount = 120,
+  n = 3,
+  minSepPct = 0.015
+): { price: number; volume: number; share: number }[] {
+  const { bins } = volumeProfile(candles, binCount);
+  const total = bins.reduce((a, b) => a + b.volume, 0) || 1;
+  const sorted = [...bins].sort((a, b) => b.volume - a.volume);
+  const picked: { price: number; volume: number; share: number }[] = [];
+  for (const b of sorted) {
+    if (b.volume <= 0) break;
+    if (picked.every((p) => p.price > 0 && Math.abs(p.price - b.price) / p.price > minSepPct)) {
+      picked.push({ price: b.price, volume: b.volume, share: b.volume / total });
+      if (picked.length >= n) break;
+    }
+  }
+  return picked;
+}
+
 /** The control. Walk `history` and, for every candidate entry bar (strided by
  *  `step`), treat that bar's close as an entry and measure adverseFraction over
  *  the next `windowBars`. Returns every sample — the base-rate distribution a

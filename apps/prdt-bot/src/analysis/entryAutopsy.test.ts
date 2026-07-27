@@ -8,6 +8,7 @@ import {
   baselineAdverse,
   percentileRank,
   isAdverse,
+  topVolumeNodes,
 } from "./entryAutopsy.js";
 import type { Candle } from "../feed/binance.js";
 
@@ -59,6 +60,23 @@ describe("volumeProfile / POC", () => {
   it("distanceToPocPct is ~0 when entry sits on the POC", () => {
     const bars = [c(50, 50, 50, 100), c(50, 50, 50, 100), c(60, 60, 60, 5)];
     expect(distanceToPocPct(bars, 50, 20)).toBeLessThan(0.05);
+  });
+});
+
+describe("topVolumeNodes", () => {
+  it("returns the highest-volume levels, most-traded first, as distinct nodes", () => {
+    const bars = [
+      c(50, 50, 50, 200), // heaviest shelf ~50
+      c(50, 50, 50, 150),
+      c(70, 70, 70, 120), // second shelf ~70
+      c(90, 90, 90, 10), // light ~90
+    ];
+    const nodes = topVolumeNodes(bars, 60, 2, 0.05);
+    expect(nodes).toHaveLength(2);
+    expect(nodes[0]!.price).toBeGreaterThanOrEqual(49);
+    expect(nodes[0]!.price).toBeLessThanOrEqual(51);
+    expect(nodes[0]!.volume).toBeGreaterThan(nodes[1]!.volume);
+    expect(nodes[0]!.share).toBeGreaterThan(0);
   });
 });
 
