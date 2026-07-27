@@ -36,6 +36,15 @@ import {
   type Side,
 } from "./analysis/entryAutopsy.js";
 import { RegimeMonitor, regimeConfigFromEnv } from "./regime/run.js";
+import { PrdtTradeStore } from "./journal/prdtStore.js";
+import {
+  evaluateTrade,
+  aggregate,
+  type PrdtTrade,
+  type TradeResult,
+  type Dir,
+  type VolDay,
+} from "./analysis/prdtJournal.js";
 import {
   evaluatePosition,
   evaluateProfitGuard,
@@ -686,6 +695,116 @@ async function cmdVprofile(flags: Map<string, string>): Promise<void> {
   console.log("----- COPY ABOVE -----\n");
 }
 
+function tradesPath(flags: Map<string, string>): string {
+  return flags.get("journal") ?? process.env.PRDT_TRADES_PATH ?? "./data/prdt-trades.jsonl";
+}
+
+async function cmdLog(flags: Map<string, string>): Promise<void> {
+  const store = new PrdtTradeStore(tradesPath(flags));
+  const symbol = (flags.get("symbol") ?? "BTCUSDT").toUpperCase();
+  const dirRaw = (flags.get("dir") ?? "").toUpperCase();
+  const dir = (dirRaw === "UP" || dirRaw === "DOWN" ? dirRaw : null) as Dir | null;
+  const entry = Number(flags.get("entry"));
+  const expiryMin = Number(flags.get("expiry") ?? 15);
+  const wall = flags.get("wall") ? Number(flags.get("wall")) : undefined;
+  const ts = flags.get("time") ? Date.parse(flags.get("time")!) : Date.now();
+  const note = flags.get("note");
+
+  if (!dir) throw new Error("log: --dir UP|DOWN is required");
+  if (!Number.isFinite(entry) || entry <= 0) throw new Error("log: --entry <price> is required (a positive number)");
+  if (!Number.isFinite(expiryMin) || expiryMin <= 0) throw new Error("log: --expiry <minutes> must be a positive number");
+  if (!Number.isFinite(ts)) throw new Error("log: --time must be a UTC ISO timestamp, e.g. 2026-07-27T15:30:00Z");
+
+  const trade: PrdtTrade = { id: String(ts), ts, symbol, dir, entry, expiryMin, wall, note };
+  store.append(trade);
+  console.log(
+    `[log] recorded ${symbol} ${dir} @ ${entry} · ${expiryMin}m` +
+      (wall ? ` · wall ${wall}` : "") +
+      ` · ${new Date(ts).toISOString()}`
+  );
+}
+
+/** Rising vs lower volume day: the entry day's daily volume vs its trailing
+ *  20-day average. Best-effort — "unknown" when the daily history is thin. */
+async function volDayFor(t: PrdtTrade): Promise<VolDay> {
+  try {
+    const daily = await fetchHistory({ symbol: t.symbol, interval: "1d", count: 25, endTime: t.ts });
+    if (daily.length < 6) return "unknown";
+    const today = daily[daily.length - 1]!.volume;
+    const prior = daily.slice(0, -1).slice(-20);
+    const avg = prior.reduce((a, c) => a + c.volume, 0) / prior.length;
+    return today >= avg ? "rising" : "lower";
+  } catch {
+    return "unknown";
+  }
+}
+
+async function cmdAutopsy(flags: Map<string, string>): Promise<void> {
+  const store = new PrdtTradeStore(tradesPath(flags));
+  const trades = store.readAll();
+  if (trades.length === 0) {
+    console.log("[autopsy] no trades logged yet — record one with `bot:log -- --dir UP --entry <p> --expiry 15 --wall <level>`.");
+    return;
+  }
+
+  const results: TradeResult[] = [];
+  for (const t of trades) {
+    try {
+      const path = await fetchKlines({ symbol: t.symbol, interval: "1m", startTime: t.ts, limit: t.expiryMin + 2 });
+      const volDay = await volDayFor(t);
+      results.push(evaluateTrade(t, path, volDay));
+    } catch (err) {
+      console.error(`[autopsy] ${t.id} (${t.symbol}) failed: ${(err as Error).message}`);
+    }
+  }
+  if (results.length === 0) {
+    console.log("[autopsy] no trades could be scored (feed unavailable?).");
+    return;
+  }
+
+  const p1 = (x: number) => `${(x * 100).toFixed(1)}%`;
+  console.log(`\n═══════════ PRDT trade autopsy · ${results.length} trade(s) ═══════════`);
+  for (const r of results) {
+    const tags = [
+      r.result,
+      `${p1(r.timeInLossPct)} in loss`,
+      r.wonUgly ? "won-ugly" : "",
+      r.lostPretty ? "lost-pretty" : "",
+      r.couldShorten ? (r.shortestWinMin !== null ? `shorten→${r.shortestWinMin}m` : "could-shorten") : "",
+      r.reaction !== "n/a" ? r.reaction : "",
+    ].filter(Boolean);
+    console.log(
+      `\n  ${r.dir} @ ${r.entry} · ${r.expiryMin}m · ${r.session} · vol:${r.volDay}` +
+        `\n    settle ${r.settle ?? "—"} → ${tags.join(" · ")}` +
+        `\n    MFE +${p1(r.maxFavorablePct)}${r.peakProfitMin !== null ? ` @${r.peakProfitMin}m` : ""} · MAE ${p1(r.maxAdversePct)}`
+    );
+  }
+
+  const a = aggregate(results);
+  const line = (label: string, m: Record<string, { n: number; wins: number; rate: number }>) => {
+    const parts = Object.entries(m).map(([k, b]) => `${k} ${b.wins}/${b.n} (${p1(b.rate)})`);
+    return parts.length ? `  ${label}: ${parts.join(" · ")}` : "";
+  };
+  console.log(
+    `\n─────────── Aggregate ───────────\n` +
+      `  Record: ${a.wins}W-${a.losses}L${a.pushes ? `-${a.pushes}P` : ""}${a.open ? ` (${a.open} open)` : ""} · win rate ${p1(a.winRate)} (breakeven ~52.6%)\n` +
+      `  Could've shortened: ${a.couldShorten}/${a.n} · won ugly: ${a.wonUgly} · lost pretty: ${a.lostPretty}\n` +
+      [
+        line("By direction", a.byDir),
+        line("By session", a.bySession),
+        line("By expiry", a.byExpiry),
+        line("By reaction", a.byReaction),
+        line("By vol day", a.byVolDay),
+      ].filter(Boolean).join("\n") +
+      `\n═════════════════════════════════`
+  );
+  if (flags.get("json") === "true") {
+    console.log("\n----- COPY BELOW (JSON) -----");
+    console.log(JSON.stringify({ results, aggregate: a }));
+    console.log("----- COPY ABOVE -----");
+  }
+}
+
 async function cmdReport(): Promise<void> {
   const cfg = loadConfig();
   const journal = new JsonlJournal(cfg.journalPath);
@@ -728,6 +847,12 @@ async function main(): Promise<void> {
     case "vprofile":
       await cmdVprofile(flags);
       break;
+    case "log":
+      await cmdLog(flags);
+      break;
+    case "autopsy":
+      await cmdAutopsy(flags);
+      break;
     case "report":
       await cmdReport();
       break;
@@ -752,6 +877,10 @@ async function main(): Promise<void> {
           `                     # alert when price heads back into your position/limit zone (add --test to ping now)\n` +
           `                     # + profit give-back guard: --breakeven 64487 --profit 0.25 --giveback 0.5\n` +
           `  peeperbot vprofile  [--symbol BTCUSDT] [--top 3]   # major volume nodes on 15m/4h/1d (JSON out)\n` +
+          `  peeperbot log       --dir UP|DOWN --entry 64364 --expiry 15 [--wall 64364] [--symbol BTCUSDT] [--time <UTC>]\n` +
+          `                     # journal a PRDT trade you took (outcome is recomputed later, never stored)\n` +
+          `  peeperbot autopsy   [--json]   # score every logged trade: win/loss, %-in-loss, shorten?, pivot/breakout,\n` +
+          `                     #             session, vol-day + aggregate win rate sliced by each\n` +
           `  peeperbot report    # performance report from the journal\n\n` +
           `Strategies: ${listStrategies().join(", ")}\n`
       );
