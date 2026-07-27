@@ -20,6 +20,8 @@
     "track": "tsx src/cli.ts track",
     "poswatch": "tsx src/cli.ts poswatch",
     "vprofile": "tsx src/cli.ts vprofile",
+    "log": "tsx src/cli.ts log",
+    "autopsy": "tsx src/cli.ts autopsy",
     "report": "tsx src/cli.ts report",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit",
