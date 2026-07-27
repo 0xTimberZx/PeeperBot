@@ -32,6 +32,7 @@ import {
   percentileRank,
   isAdverse,
   mean,
+  topVolumeNodes,
   type Side,
 } from "./analysis/entryAutopsy.js";
 import { RegimeMonitor, regimeConfigFromEnv } from "./regime/run.js";
@@ -646,6 +647,45 @@ async function cmdPosWatch(flags: Map<string, string>): Promise<void> {
   }
 }
 
+async function cmdVprofile(flags: Map<string, string>): Promise<void> {
+  const symbol = (flags.get("symbol") ?? "BTCUSDT").toUpperCase();
+  const top = Math.max(1, Math.min(6, Number(flags.get("top") ?? 3)));
+  // Each timeframe with a lookback that gives a meaningful profile without
+  // paging forever: 15m ≈ 5 days, 4h ≈ 80 days, 1d ≈ 1.5 years.
+  const tfs: { key: string; interval: Interval; count: number }[] = [
+    { key: "15m", interval: "15m", count: 480 },
+    { key: "4h", interval: "4h", count: 480 },
+    { key: "1d", interval: "1d", count: 540 },
+  ];
+
+  const out: Record<string, unknown> = { symbol, generated: new Date().toISOString(), timeframes: {} };
+  let price = 0;
+  console.log(`\n═══════ Volume profile · ${symbol} ═══════`);
+  for (const tf of tfs) {
+    const candles = await fetchHistory({ symbol, interval: tf.interval, count: tf.count });
+    price = candles[candles.length - 1]?.close ?? price;
+    const nodes = topVolumeNodes(candles, 120, top, 0.015);
+    const lo = Math.min(...candles.map((c) => c.low));
+    const hi = Math.max(...candles.map((c) => c.high));
+    (out.timeframes as Record<string, unknown>)[tf.key] = {
+      bars: candles.length,
+      low: lo,
+      high: hi,
+      nodes: nodes.map((n) => ({ price: Number(n.price.toFixed(2)), share: Number((n.share * 100).toFixed(1)) })),
+    };
+    console.log(
+      `\n${tf.key} (${candles.length} bars, ${lo.toFixed(0)}–${hi.toFixed(0)}):\n` +
+        nodes.map((n, i) => `  ${i + 1}. ${n.price.toFixed(2)}  (${(n.share * 100).toFixed(1)}% of volume)`).join("\n")
+    );
+  }
+  (out as Record<string, unknown>).price = Number(price.toFixed(2));
+  console.log(`\ncurrent price: ${price.toFixed(2)}`);
+  // Machine-readable block to paste back for rendering.
+  console.log("\n----- COPY BELOW (JSON) -----");
+  console.log(JSON.stringify(out));
+  console.log("----- COPY ABOVE -----\n");
+}
+
 async function cmdReport(): Promise<void> {
   const cfg = loadConfig();
   const journal = new JsonlJournal(cfg.journalPath);
@@ -685,6 +725,9 @@ async function main(): Promise<void> {
     case "poswatch":
       await cmdPosWatch(flags);
       break;
+    case "vprofile":
+      await cmdVprofile(flags);
+      break;
     case "report":
       await cmdReport();
       break;
@@ -708,6 +751,7 @@ async function main(): Promise<void> {
           `  peeperbot poswatch  --symbol BTCUSDT --side short --entry 64487 --limits 65780,66500,68000 --stop 69100\n` +
           `                     # alert when price heads back into your position/limit zone (add --test to ping now)\n` +
           `                     # + profit give-back guard: --breakeven 64487 --profit 0.25 --giveback 0.5\n` +
+          `  peeperbot vprofile  [--symbol BTCUSDT] [--top 3]   # major volume nodes on 15m/4h/1d (JSON out)\n` +
           `  peeperbot report    # performance report from the journal\n\n` +
           `Strategies: ${listStrategies().join(", ")}\n`
       );
