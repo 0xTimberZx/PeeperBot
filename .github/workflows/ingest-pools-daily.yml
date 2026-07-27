@@ -14,8 +14,13 @@ name: Daily Ingestion
 # packages/db/migrations/001_init.sql).
 
 on:
-  schedule:
-    - cron: "0 6 * * *" # daily at 06:00 UTC
+  # Daily schedule DISABLED. This inherited BrokerForce pipeline needs a
+  # persistent DATABASE_URL secret (see the header comment) that isn't set,
+  # so every scheduled run fail-fasts on the guard step and emails a failure
+  # notice. PeeperBot (the bot in apps/prdt-bot) does not use this pipeline.
+  # To re-enable, set the DATABASE_URL secret and uncomment the schedule below.
+  # schedule:
+  #   - cron: "0 6 * * *" # daily at 06:00 UTC
   workflow_dispatch: {}
 
 concurrency:
