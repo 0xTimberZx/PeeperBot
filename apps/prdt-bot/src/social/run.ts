@@ -55,6 +55,11 @@ export interface FollowLoopConfig {
   /** Credits per US dollar, for turning the estimate into money.
    *  twitterapi.io: 100,000. */
   creditsPerUsd: number;
+  /** Whether the query already asks the provider to return only new posts —
+   *  either a since parameter, or a {sinceTime}/{sinceId} bound in the path
+   *  template. Decides whether re-reading seen posts is waste worth flagging
+   *  or simply the floor. */
+  serverSideFiltered: boolean;
 }
 
 export class TraderFollowWatcher {
@@ -205,11 +210,16 @@ export class TraderFollowWatcher {
       );
     }
 
-    if (repeats > 0 && repeats === tweets.length && !process.env.XAPI_SINCE_PARAM) {
+    // Only nag when nothing is bounding the query yet. Once a bound is wired
+    // in, a fetch of already-seen posts is the expected floor, not waste —
+    // and telling someone to fix a thing they have fixed is how a useful
+    // warning turns into noise people learn to scroll past.
+    if (repeats > 0 && repeats === tweets.length && !this.cfg.serverSideFiltered) {
       console.log(
         `[follow] every post in that fetch was one you'd already paid for. ` +
-          `Set XAPI_SINCE_PARAM to your provider's "newer than this id" parameter ` +
-          `(twitterapi.io: check their docs for the exact name) to stop re-reading them.`
+          `Bound the query server-side so quiet polls cost almost nothing. On twitterapi.io ` +
+          `(verified): XAPI_PATH=/twitter/tweet/advanced_search` +
+          `?query=from%3A{handle}%20since_time%3A{sinceTime}&queryType=Latest`
       );
     }
   }
@@ -429,6 +439,8 @@ export function followConfigFromEnv(overrides: Partial<FollowLoopConfig> = {}): 
     journalPath: str("X_JOURNAL_PATH", "./data/follow-journal.jsonl"),
     creditsPerPost: num("XAPI_CREDITS_PER_POST", 15),
     creditsPerUsd: num("XAPI_CREDITS_PER_USD", 100_000),
+    serverSideFiltered:
+      str("XAPI_SINCE_PARAM", "").trim() !== "" || /\{since(Time|Id)\}/.test(str("XAPI_PATH", "")),
     params: {
       ...DEFAULT_WATCH_PARAMS,
       entryFloor: num("X_ENTRY_FLOOR", DEFAULT_WATCH_PARAMS.entryFloor),

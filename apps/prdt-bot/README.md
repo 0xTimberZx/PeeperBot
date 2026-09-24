@@ -422,9 +422,21 @@ XAPI_PATH=/twitter/tweet/advanced_search?query=from%3A{handle}%20since_time%3A{s
 ```
 
 The watcher fills `{sinceTime}` with the **later** of its watermark and the age
-cutoff, so it asks only for posts it would actually act on. Expect `fetched 0-2
-post(s)` instead of 20 — roughly a 10× cut. Template placeholders available:
-`{handle}`, `{limit}`, `{sinceTime}` (unix seconds), `{sinceId}`.
+cutoff, so it asks only for posts it would actually act on. Template
+placeholders available: `{handle}`, `{limit}`, `{sinceTime}` (unix seconds),
+`{sinceId}`.
+
+Measured on a live account, same poll interval, before and after:
+
+| | posts/poll | credits/poll | projected |
+|---|---|---|---|
+| `last_tweets` (fixed page) | 20 | 300 | ~$8.64/month |
+| `advanced_search` + `since_time` | **1** | **15** | **~$0.43/month** |
+
+A 20× cut, because 18 of those 20 were older than the cutoff and would have
+been discarded anyway. Once a bound is configured the watcher stops nagging
+about repeat fetches — at that point re-reading the newest post is the floor,
+not waste.
 
 For providers that do use a plain "newer than this id" parameter, name it in
 `XAPI_SINCE_PARAM` instead. Both are unset by default, because the spelling
