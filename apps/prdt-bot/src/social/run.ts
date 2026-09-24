@@ -49,11 +49,14 @@ export interface FollowLoopConfig {
    *  null disables journaling — which also means you can never find out
    *  whether copying him works. */
   journalPath: string | null;
+  /** What one returned post costs, for the running spend estimate.
+   *  twitterapi.io: 15 credits ($0.00015). Purely for reporting. */
+  creditsPerPost: number;
 }
 
 export class TraderFollowWatcher {
   private running = false;
-  private state: WatchState = { seenIds: [] };
+  private state: WatchState = { seenIds: [], lastId: null, fetched: 0 };
   private readonly journal: FollowJournal | null;
 
   constructor(
@@ -68,7 +71,13 @@ export class TraderFollowWatcher {
   async tick(now: number): Promise<void> {
     let tweets;
     try {
-      tweets = await this.source.fetchRecent({ handle: this.cfg.handle, limit: this.cfg.fetchLimit });
+      tweets = await this.source.fetchRecent({
+        handle: this.cfg.handle,
+        limit: this.cfg.fetchLimit,
+        // Only meaningful once the provider's parameter name is configured;
+        // adapters that don't know it simply ignore this.
+        ...(this.state.lastId ? { sinceId: this.state.lastId } : {}),
+      });
     } catch (err) {
       // "No data right now" is expected with a reseller API — log and wait for
       // the next tick rather than killing a watcher that's meant to run for days.
@@ -78,6 +87,8 @@ export class TraderFollowWatcher {
       }
       throw err;
     }
+
+    this.accountForCost(tweets);
 
     const { signals, seen, notes } = evaluate(tweets, this.state, this.cfg.params, now);
     for (const n of notes) console.log(`[follow] ${n}`);
@@ -102,12 +113,57 @@ export class TraderFollowWatcher {
       this.record(sig, ctx, now);
     }
 
+    // Advance the watermark to the newest post in this fetch, but never
+    // backwards — a deleted post can shrink a timeline, and rewinding would
+    // re-fetch (and re-pay for) everything after it.
+    for (const t of tweets) {
+      if (this.state.lastIdAt === undefined || t.createdAt > this.state.lastIdAt) {
+        this.state.lastId = t.id;
+        this.state.lastIdAt = t.createdAt;
+      }
+    }
+
     if (seen.length > 0) {
       this.state.seenIds = trimSeen([...this.state.seenIds, ...seen]);
-      this.persist();
     }
+    // Always persist: the watermark and the credit tally move even on a poll
+    // that surfaced nothing, and losing them means paying for the catch-up.
+    this.persist();
     if (signals.length === 0) {
       console.log(`[follow] ${tweets.length} post(s) checked · nothing actionable`);
+    }
+  }
+
+  /**
+   * Track what this poll cost and say so.
+   *
+   * These providers bill per post RETURNED, not per request, so a watcher on a
+   * quiet timeline spends almost everything re-reading posts it already has.
+   * That burn is invisible unless something prints it — and at 15 credits a
+   * post, a default-configured watcher can drain a starter balance in under an
+   * hour. So every poll reports what it consumed, and when most of a fetch was
+   * posts we'd already seen, it names the one setting that stops paying for
+   * them.
+   */
+  private accountForCost(tweets: { id: string }[]): void {
+    const known = new Set(this.state.seenIds);
+    const repeats = tweets.filter((t) => known.has(t.id)).length;
+    this.state.fetched = (this.state.fetched ?? 0) + tweets.length;
+
+    const creditsNow = tweets.length * this.cfg.creditsPerPost;
+    const creditsTotal = this.state.fetched * this.cfg.creditsPerPost;
+    console.log(
+      `[follow] fetched ${tweets.length} post(s)` +
+        (repeats > 0 ? `, ${repeats} already seen` : "") +
+        ` · ~${creditsNow} credits this poll · ~${creditsTotal} since this state file began`
+    );
+
+    if (repeats > 0 && repeats === tweets.length && !process.env.XAPI_SINCE_PARAM) {
+      console.log(
+        `[follow] every post in that fetch was one you'd already paid for. ` +
+          `Set XAPI_SINCE_PARAM to your provider's "newer than this id" parameter ` +
+          `(twitterapi.io: check their docs for the exact name) to stop re-reading them.`
+      );
     }
   }
 
@@ -191,9 +247,14 @@ export class TraderFollowWatcher {
     if (!this.cfg.statePath) return;
     try {
       const s = JSON.parse(readFileSync(this.cfg.statePath, "utf8")) as Partial<WatchState>;
-      this.state = { seenIds: Array.isArray(s.seenIds) ? s.seenIds.map(String) : [] };
+      this.state = {
+        seenIds: Array.isArray(s.seenIds) ? s.seenIds.map(String) : [],
+        lastId: typeof s.lastId === "string" ? s.lastId : null,
+        lastIdAt: typeof s.lastIdAt === "number" ? s.lastIdAt : undefined,
+        fetched: typeof s.fetched === "number" ? s.fetched : 0,
+      };
     } catch {
-      this.state = { seenIds: [] };
+      this.state = { seenIds: [], lastId: null, fetched: 0 };
     }
   }
 
@@ -287,6 +348,7 @@ export function sourceFromEnv(): TweetSource {
       apiKey: str("XAPI_KEY", ""),
       path: process.env.XAPI_PATH,
       authHeader: process.env.XAPI_AUTH_HEADER,
+      sinceParam: process.env.XAPI_SINCE_PARAM,
       timeoutMs: num("XAPI_TIMEOUT_MS", 10_000),
     });
   }
@@ -301,14 +363,21 @@ export function followConfigFromEnv(overrides: Partial<FollowLoopConfig> = {}): 
 
   return {
     handle: str("X_HANDLE", "ChentoTrades").replace(/^@/, ""),
-    fetchLimit: num("X_FETCH_LIMIT", 20),
-    pollSeconds: num("X_POLL_SECONDS", 120),
+    // These two defaults are a BUDGET, not a latency choice. Providers bill
+    // per post returned (~15 credits each), so 20 posts every 2 minutes runs
+    // to roughly $65/month and drains a starter balance in about an hour.
+    // 10 posts every 5 minutes is ~$6/month and costs nothing on a 12h
+    // horizon — the alert already tells you how late you are. Raise them only
+    // if you've checked what it spends.
+    fetchLimit: num("X_FETCH_LIMIT", 10),
+    pollSeconds: num("X_POLL_SECONDS", 300),
     statePath: str("X_STATE_PATH", "./data/follow-state.json"),
     priceLookup: bool("X_PRICE_LOOKUP", true),
     profileInterval: str("X_PROFILE_INTERVAL", "15m") as Interval,
     profileCandles: num("X_PROFILE_CANDLES", 480), // ≈5 days of 15m
     profileNodes: num("X_PROFILE_NODES", 3),
     journalPath: str("X_JOURNAL_PATH", "./data/follow-journal.jsonl"),
+    creditsPerPost: num("XAPI_CREDITS_PER_POST", 15),
     params: {
       ...DEFAULT_WATCH_PARAMS,
       entryFloor: num("X_ENTRY_FLOOR", DEFAULT_WATCH_PARAMS.entryFloor),

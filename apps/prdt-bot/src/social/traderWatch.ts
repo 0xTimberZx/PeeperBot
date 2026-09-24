@@ -74,6 +74,16 @@ export interface TraderSignal {
 export interface WatchState {
   /** Post ids already handled. Capped by the caller — only recency matters. */
   seenIds: string[];
+  /** Newest post id seen so far, handed back to the provider so it can return
+   *  only what's new. Billing is per post returned, so this is a cost lever,
+   *  not just an optimization. */
+  lastId?: string | null;
+  /** Timestamp of `lastId`, so the watermark only ever moves forward. Post id
+   *  formats differ per provider, so ids can't be ordered directly — the
+   *  normalized timestamp can. */
+  lastIdAt?: number;
+  /** Cumulative posts fetched, for the running credit estimate. */
+  fetched?: number;
 }
 
 export interface Evaluation {
