@@ -1,0 +1,22 @@
+[
+  {
+    "id": "example-1",
+    "text": "Long $BTC here. Bidding 92.4k, invalidation under 91k, first target 97k.",
+    "createdAt": "2026-09-24T11:58:00Z"
+  },
+  {
+    "id": "example-2",
+    "text": "bullish btc into the weekend",
+    "createdAt": "2026-09-24T11:50:00Z"
+  },
+  {
+    "id": "example-3",
+    "text": "thinking about a long on $SOL if it holds 180",
+    "createdAt": "2026-09-24T11:40:00Z"
+  },
+  {
+    "id": "example-4",
+    "text": "closed my $BTC long, took profit into 95k",
+    "createdAt": "2026-09-24T11:30:00Z"
+  }
+]
