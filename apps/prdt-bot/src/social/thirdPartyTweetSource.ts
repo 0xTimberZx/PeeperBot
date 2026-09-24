@@ -21,6 +21,19 @@ export interface ThirdPartyConfig {
   /** Path template; {handle} and {limit} are substituted. Defaults to
    *  twitterapi.io's last-tweets route. */
   path?: string;
+  /**
+   * Query parameter name this provider uses for "only posts newer than this
+   * id" — e.g. `since_id`. Left unset by default, deliberately.
+   *
+   * You pay per post RETURNED, so on a quiet timeline nearly every credit goes
+   * on re-reading posts you already have. Sending this is the one change that
+   * fixes that. But the parameter name differs per provider and an unknown
+   * name is, at best, silently ignored and at worst a 400 — and this adapter
+   * can't verify twitterapi.io's spelling from here. So the plumbing is
+   * wired end to end and the name is yours to confirm from their docs, one
+   * line in .env, rather than a guess that fails quietly at your expense.
+   */
+  sinceParam?: string;
   /** Header the provider wants the key in. twitterapi.io: X-API-Key.
    *  socialdata.tools: Authorization (as "Bearer <key>"). */
   authHeader?: string;
@@ -38,9 +51,16 @@ export class ThirdPartyTweetSource implements TweetSource {
   }
 
   async fetchRecent(query: TweetQuery): Promise<Tweet[]> {
-    const path = (this.cfg.path ?? DEFAULT_PATH)
+    let path = (this.cfg.path ?? DEFAULT_PATH)
       .replace("{handle}", encodeURIComponent(query.handle))
       .replace("{limit}", String(query.limit));
+
+    // Ask for only what's new, when the provider's parameter name is known.
+    if (this.cfg.sinceParam && query.sinceId) {
+      const sep = path.includes("?") ? "&" : "?";
+      path += `${sep}${encodeURIComponent(this.cfg.sinceParam)}=${encodeURIComponent(query.sinceId)}`;
+    }
+
     const url = `${this.cfg.baseUrl.replace(/\/$/, "")}${path}`;
 
     const header = this.cfg.authHeader ?? "X-API-Key";
@@ -82,25 +102,41 @@ export class ThirdPartyTweetSource implements TweetSource {
   }
 }
 
-/** Depth-first walk for the first array whose members look like posts. */
-function firstPostArray(body: unknown, depth = 0): Record<string, unknown>[] | null {
+/** Keys that name the post collection outright. An array under one of these
+ *  is the posts, whether or not it happens to be empty. */
+const POST_KEYS = ["tweets", "data", "results", "statuses", "items"];
+
+/**
+ * Depth-first walk for the first array whose members look like posts.
+ *
+ * `named` means we got here through a key that identifies the collection
+ * (or from the response root). That distinction matters for the EMPTY case:
+ * `{"tweets": []}` is a quiet timeline and must normalize to no posts, while
+ * an unnamed empty array somewhere in an unfamiliar payload tells us nothing
+ * and should keep searching. Without the distinction an empty timeline throws
+ * "no post array found" — which breaks every poll precisely when the sinceId
+ * optimization is doing its job and the provider correctly returns nothing.
+ */
+function firstPostArray(body: unknown, depth = 0, named = true): Record<string, unknown>[] | null {
   if (depth > 4 || body === null || typeof body !== "object") return null;
 
   if (Array.isArray(body)) {
     const objects = body.filter((x): x is Record<string, unknown> => typeof x === "object" && x !== null);
-    return objects.some(looksLikePost) ? objects : null;
+    if (objects.some(looksLikePost)) return objects;
+    if (named && body.length === 0) return []; // an empty timeline, not an unknown shape
+    return null;
   }
 
   // Check likely keys first so we don't latch onto some unrelated array.
   const obj = body as Record<string, unknown>;
-  for (const key of ["tweets", "data", "results", "statuses", "items"]) {
+  for (const key of POST_KEYS) {
     if (key in obj) {
-      const hit = firstPostArray(obj[key], depth + 1);
+      const hit = firstPostArray(obj[key], depth + 1, true);
       if (hit) return hit;
     }
   }
   for (const v of Object.values(obj)) {
-    const hit = firstPostArray(v, depth + 1);
+    const hit = firstPostArray(v, depth + 1, false);
     if (hit) return hit;
   }
   return null;

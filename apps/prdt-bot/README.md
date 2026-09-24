@@ -384,12 +384,44 @@ so, and past that it checks the gap to breakeven against sampling noise before
 claiming anything. The failure mode of every copy-trade experiment is stopping
 the measurement at n=7 and believing whichever answer it gave.
 
-**Reading X costs money.** X's own API is $200/mo for timeline reads, so the
-default is a third-party reseller (twitterapi.io, socialdata.tools) at cents per
-thousand reads — set `XAPI_KEY`. These are unofficial and can change their JSON
-shape, so the adapter reads fields by alias and fails loudly rather than going
-quietly silent, which on a copy-trade watcher is indistinguishable from "he
-hasn't posted." `XSOURCE=file` replays a fixture with no key at all.
+### Reading X costs money — and the polling defaults are a budget
+
+X's own API is $200/mo for timeline reads, so the default is a third-party
+reseller (twitterapi.io, socialdata.tools) — set `XAPI_KEY`.
+
+They bill **per post returned**, not per request. twitterapi.io charges ~15
+credits a post ($0.00015, $0.15/1k). That makes the two polling knobs a
+spending decision:
+
+| `X_FETCH_LIMIT` | `X_POLL_SECONDS` | Roughly |
+|---|---|---|
+| 20 | 120 (2 min) | ~$65/month — drains a $0.10 starter balance in **about an hour** |
+| **10** | **300 (5 min)** | **~$6/month — the shipped default** |
+
+On a 12h horizon a 5-minute poll costs you nothing in edge; the alert already
+states how late you are. **Every poll prints what it spent**, so the burn is
+visible rather than discovered on an empty balance:
+
+```
+[follow] fetched 10 post(s), 9 already seen · ~150 credits this poll · ~4,350 since this state file began
+[follow] every post in that fetch was one you'd already paid for.
+         Set XAPI_SINCE_PARAM to your provider's "newer than this id" parameter…
+```
+
+That hint is the real fix: on a quiet timeline nearly every credit goes on
+re-reading posts you already have. The watcher tracks a watermark (newest post
+id) and sends it every poll — but only once you tell it the parameter name via
+`XAPI_SINCE_PARAM`, because that name differs per provider and a wrong one is
+either ignored (still billing you) or a 400. Confirm it in your provider's docs,
+then set it once.
+
+These resellers are unofficial and can change their JSON shape, so the adapter
+reads fields by alias across the common spellings (`id`/`id_str`/`tweet_id`,
+`text`/`full_text`, epoch or ISO timestamps) and **fails loudly** on a shape it
+can't read — going quietly silent is indistinguishable from "he hasn't posted."
+An *empty* collection is the one exception: that's a quiet timeline and
+normalizes to no posts, which is the steady state once `XAPI_SINCE_PARAM` is
+working. `XSOURCE=file` replays a fixture with no key at all.
 
 ## Always-on phone alerts (scheduled GitHub Actions)
 

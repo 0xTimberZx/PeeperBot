@@ -62,6 +62,11 @@ jobs:
           XAPI_BASE: ${{ vars.XAPI_BASE }}
           XAPI_PATH: ${{ vars.XAPI_PATH }}
           XAPI_AUTH_HEADER: ${{ vars.XAPI_AUTH_HEADER }}
+          # Cost levers. XAPI_SINCE_PARAM is the big one: without it every
+          # 5-minute tick pays to re-read posts it already has. X_FETCH_LIMIT
+          # defaults to 10; raise it only after watching what a tick spends.
+          XAPI_SINCE_PARAM: ${{ vars.XAPI_SINCE_PARAM }}
+          X_FETCH_LIMIT: ${{ vars.X_FETCH_LIMIT }}
           X_HANDLE: ${{ github.event.inputs.handle || vars.X_HANDLE }}
           X_HORIZON_HOURS: ${{ github.event.inputs.horizon || vars.X_HORIZON_HOURS }}
           X_ENTRY_FLOOR: ${{ vars.X_ENTRY_FLOOR }}
