@@ -42,6 +42,16 @@ export interface ThirdPartyConfig {
 
 const DEFAULT_PATH = "/twitter/user/last_tweets?userName={handle}&count={limit}";
 
+/**
+ * 20s, raised from 10s after a live call against twitterapi.io timed out at 10
+ * while the same request succeeded moments later from the same host. These
+ * responses are heavy — each post carries the full author profile, entities,
+ * media and any quoted post — and a cold DNS/TLS handshake on a shared runner
+ * eats into the budget. A poll that gives up early costs a missed call, while
+ * one that waits costs a few seconds, so the asymmetry favours patience.
+ */
+const DEFAULT_TIMEOUT_MS = 20_000;
+
 export class ThirdPartyTweetSource implements TweetSource {
   readonly name = "thirdparty";
 
@@ -67,7 +77,7 @@ export class ThirdPartyTweetSource implements TweetSource {
     const value = header.toLowerCase() === "authorization" ? `Bearer ${this.cfg.apiKey}` : this.cfg.apiKey;
 
     const ctl = new AbortController();
-    const timer = setTimeout(() => ctl.abort(), this.cfg.timeoutMs ?? 10_000);
+    const timer = setTimeout(() => ctl.abort(), this.cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS);
     let body: unknown;
     try {
       const res = await fetch(url, { headers: { [header]: value, accept: "application/json" }, signal: ctl.signal });
@@ -83,7 +93,7 @@ export class ThirdPartyTweetSource implements TweetSource {
     } catch (err) {
       if (err instanceof TweetSourceUnavailableError) throw err;
       if ((err as Error).name === "AbortError") {
-        throw new TweetSourceUnavailableError(`${this.name} timed out after ${this.cfg.timeoutMs ?? 10_000}ms`);
+        throw new TweetSourceUnavailableError(`${this.name} timed out after ${this.cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS}ms`);
       }
       throw err;
     } finally {
