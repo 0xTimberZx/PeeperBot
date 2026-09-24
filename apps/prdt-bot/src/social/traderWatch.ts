@@ -20,6 +20,7 @@
 import type { Tweet } from "./tweetSource.js";
 import { parseCall, type CallKind, type Side, type TradeCall } from "./parseCall.js";
 import type { LevelReading } from "./parseLevels.js";
+import { ANY_VENUE, blockReason, type VenueSpec } from "./venue.js";
 
 export interface WatchParams {
   /** Minimum parse confidence to alert on an entry. */
@@ -38,6 +39,13 @@ export interface WatchParams {
   /** Also alert on exits and position updates, not just fresh entries. */
   includeExits: boolean;
   extraSymbols: string[];
+  /** Where you'd execute the copy — decides what's actually tradeable. */
+  venue: VenueSpec;
+  /** What to do with a call you can't execute at your venue. "flag" still
+   *  alerts, clearly marked (he went long SOL — useful context, not a trade).
+   *  "skip" stays silent. Flag is the default because silently dropping a real
+   *  call is the failure mode that's hardest to notice. */
+  venueMode: "flag" | "skip";
 }
 
 export const DEFAULT_WATCH_PARAMS: WatchParams = {
@@ -50,6 +58,8 @@ export const DEFAULT_WATCH_PARAMS: WatchParams = {
   skipRetweets: true,
   includeExits: true,
   extraSymbols: [],
+  venue: ANY_VENUE,
+  venueMode: "flag",
 };
 
 export interface TraderSignal {
@@ -57,6 +67,8 @@ export interface TraderSignal {
   call: TradeCall;
   ageMin: number;
   stale: boolean;
+  /** Why this can't be executed at your venue, or null when it can. */
+  blocked?: string | null;
 }
 
 export interface WatchState {
@@ -127,7 +139,15 @@ export function evaluate(
         if (!params.includeExits) continue;
         if (call.confidence < params.exitFloor) continue;
       }
-      signals.push({ tweet: t, call, ageMin, stale: ageMin > params.staleMin });
+      // Venue gating applies only to entries: an exit on an asset you can't
+      // trade is still worth knowing if you're holding something correlated,
+      // and it never asks you to open anything.
+      const blocked = call.kind === "entry" ? blockReason(params.venue, call.symbol, params.horizonHours) : null;
+      if (blocked && params.venueMode === "skip") {
+        notes.push(`skip ${t.id}: ${blocked}`);
+        continue;
+      }
+      signals.push({ tweet: t, call, ageMin, stale: ageMin > params.staleMin, blocked });
     }
   }
 
@@ -167,9 +187,16 @@ export function formatSignal(sig: TraderSignal, params: WatchParams, ctx: Format
   if (call.kind === "entry" && call.side) {
     const dir = copyDirection(call.side);
     lines.push(`${handle} opened ${dir} $${call.symbol}`);
-    lines.push(`→ your play: ${params.horizonHours}h ${dir} $${call.symbol}`);
-    const expiry = new Date(Date.now() + params.horizonHours * 3_600_000);
-    lines.push(`   expires ~${expiry.toISOString().replace("T", " ").slice(0, 16)} UTC`);
+    if (sig.blocked) {
+      // Never render an action line for something you can't execute — that's
+      // how you end up hunting for a market that doesn't exist at 3am.
+      lines.push(`⛔ NOT EXECUTABLE — ${sig.blocked}`);
+      lines.push(`   context only; no position to open here`);
+    } else {
+      lines.push(`→ your play: ${params.horizonHours}h ${dir} $${call.symbol}`);
+      const expiry = new Date(Date.now() + params.horizonHours * 3_600_000);
+      lines.push(`   expires ~${expiry.toISOString().replace("T", " ").slice(0, 16)} UTC`);
+    }
   } else if (call.kind === "exit") {
     const what = call.side ? `${copyDirection(call.side)} ` : "";
     lines.push(`${handle} CLOSED his ${what}$${call.symbol}`);
