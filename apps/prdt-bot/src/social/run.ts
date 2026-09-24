@@ -80,6 +80,7 @@ export class TraderFollowWatcher {
         // Only meaningful once the provider's parameter name is configured;
         // adapters that don't know it simply ignore this.
         ...(this.state.lastId ? { sinceId: this.state.lastId } : {}),
+        sinceTime: this.sinceTime(now),
       });
     } catch (err) {
       // "No data right now" is expected with a reseller API — log and wait for
@@ -135,6 +136,25 @@ export class TraderFollowWatcher {
     if (signals.length === 0) {
       console.log(`[follow] ${tweets.length} post(s) checked · nothing actionable`);
     }
+  }
+
+  /**
+   * The oldest post worth paying for, in unix SECONDS.
+   *
+   * Two bounds, and the tighter one wins:
+   *   - the watermark: everything up to the newest post we've handled is
+   *     already in the latch, so re-reading it is pure waste;
+   *   - the age cutoff: the watcher discards anything older than
+   *     X_MAX_AGE_MIN regardless, so paying for it buys a guaranteed skip.
+   *
+   * The second is what makes this work on a first run, when there is no
+   * watermark at all — which is precisely the run that would otherwise pull
+   * the whole back-timeline.
+   */
+  private sinceTime(now: number): number {
+    const ageFloor = now - this.cfg.params.maxAgeMin * 60_000;
+    const watermark = this.state.lastIdAt ?? 0;
+    return Math.floor(Math.max(ageFloor, watermark) / 1000);
   }
 
   /**

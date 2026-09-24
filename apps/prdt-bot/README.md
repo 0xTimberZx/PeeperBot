@@ -408,12 +408,28 @@ visible rather than discovered on an empty balance:
          Set XAPI_SINCE_PARAM to your provider's "newer than this id" parameter…
 ```
 
-That hint is the real fix: on a quiet timeline nearly every credit goes on
-re-reading posts you already have. The watcher tracks a watermark (newest post
-id) and sends it every poll — but only once you tell it the parameter name via
-`XAPI_SINCE_PARAM`, because that name differs per provider and a wrong one is
-either ignored (still billing you) or a 400. Confirm it in your provider's docs,
-then set it once.
+That hint points at the real fix. On a quiet timeline nearly every credit goes
+on re-reading posts you already have — and everything older than
+`X_MAX_AGE_MIN` is money spent on a post the watcher was always going to skip.
+
+On twitterapi.io the fix is **not** a query parameter. Its `advanced_search`
+endpoint takes `since_time:` as a *search operator* inside the query string, so
+no amount of appending `&since_id=` would have worked. Switch to it with one
+line:
+
+```
+XAPI_PATH=/twitter/tweet/advanced_search?query=from%3A{handle}%20since_time%3A{sinceTime}&queryType=Latest
+```
+
+The watcher fills `{sinceTime}` with the **later** of its watermark and the age
+cutoff, so it asks only for posts it would actually act on. Expect `fetched 0-2
+post(s)` instead of 20 — roughly a 10× cut. Template placeholders available:
+`{handle}`, `{limit}`, `{sinceTime}` (unix seconds), `{sinceId}`.
+
+For providers that do use a plain "newer than this id" parameter, name it in
+`XAPI_SINCE_PARAM` instead. Both are unset by default, because the spelling
+differs per provider and a wrong one is either ignored (still billing you) or a
+400.
 
 These resellers are unofficial and can change their JSON shape, so the adapter
 reads fields by alias across the common spellings (`id`/`id_str`/`tweet_id`,

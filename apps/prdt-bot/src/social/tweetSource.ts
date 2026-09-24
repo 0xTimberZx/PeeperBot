@@ -31,6 +31,15 @@ export interface TweetQuery {
    *  that can't filter server-side may ignore it; the seen-latch dedupes
    *  regardless, so this is an optimization, not a correctness requirement. */
   sinceId?: string;
+  /**
+   * Unix SECONDS — the oldest post worth paying for. Distinct from sinceId
+   * because the providers that support server-side filtering mostly express it
+   * as a time bound (twitterapi.io takes a `since_time:` search operator), and
+   * because a time bound can be derived even on a first run with no watermark:
+   * the watcher already discards anything older than X_MAX_AGE_MIN, so asking
+   * for older posts is money spent on posts destined for the bin.
+   */
+  sinceTime?: number;
 }
 
 export interface TweetSource {
