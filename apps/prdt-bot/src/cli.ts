@@ -834,6 +834,12 @@ async function cmdReport(): Promise<void> {
   console.log("\n" + formatReport(report));
 }
 
+/** Running inside a GitHub Actions runner — where config comes from repository
+ *  secrets and variables, not from a .env file that was never checked in. */
+function inGithubActions(): boolean {
+  return process.env.GITHUB_ACTIONS === "true";
+}
+
 /**
  * Follow a trader's X posts and page you when he opens a position, so you can
  * put on the same direction for your own horizon. It never trades.
@@ -861,9 +867,15 @@ async function cmdFollow(flags: Map<string, string>): Promise<void> {
     const channels = dispatcher.channelNames;
     console.log(`\n[follow] active alert channels: [${channels.join(", ")}]`);
     if (!channels.includes("telegram")) {
+      // Name the right place to put them. Run from a workflow, ".env" is
+      // advice for a file that isn't there and will never be read — the
+      // runner takes repository secrets.
       console.log(
         "[follow] ⚠️  Telegram is NOT configured — this will only print here, not reach your phone.\n" +
-          "          Add TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID to apps/prdt-bot/.env, then re-run."
+          (inGithubActions()
+            ? "          Add TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID as repository SECRETS\n" +
+              "          (Settings → Secrets and variables → Actions), then re-run this workflow."
+            : "          Add TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID to apps/prdt-bot/.env, then re-run.")
       );
     }
     const sig = sampleSignal(loop.handle);
@@ -885,6 +897,22 @@ async function cmdFollow(flags: Map<string, string>): Promise<void> {
       kind: "info",
     });
     return;
+  }
+
+  // A scheduled tick with no key configured yet: say so and exit 0, the same
+  // way poswatch no-ops when no position is armed. The cron fires every 15
+  // minutes, so throwing here would mean ~96 failed runs a day, each emailing
+  // the repo owner about a setup step rather than a fault. A manual run still
+  // errors, because there the missing key IS the thing you want to be told.
+  if (flags.get("once") === "true" && !flags.get("fixture")) {
+    const kind = (process.env.XSOURCE ?? "thirdparty").toLowerCase();
+    if (kind === "thirdparty" && (process.env.XAPI_KEY ?? "").trim() === "") {
+      console.log(
+        `[follow] not configured — no XAPI_KEY, so there is nothing to poll. Skipping.\n` +
+          `         ${inGithubActions() ? "Add it under Settings → Secrets and variables → Actions." : "Add it to apps/prdt-bot/.env."}`
+      );
+      return;
+    }
   }
 
   // --fixture replays posts from a file: how you check the parser against

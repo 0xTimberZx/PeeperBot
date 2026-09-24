@@ -16,9 +16,26 @@ name: Follow watch
 # so it still won't blast you with old calls).
 #
 # Set up once, under Settings → Secrets and variables → Actions:
-#   Secrets:   XAPI_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
-#   Variables: X_HANDLE (default ChentoTrades), X_HORIZON_HOURS (default 12),
-#              X_ENTRY_FLOOR, XAPI_BASE — all optional.
+#
+#   Secrets (required):
+#     XAPI_KEY             your twitterapi.io key
+#     TELEGRAM_BOT_TOKEN   from @BotFather
+#     TELEGRAM_CHAT_ID     from @userinfobot
+#
+#   Variables — set this one, it is a 20x cost difference:
+#     XAPI_PATH=/twitter/tweet/advanced_search?query=from%3A{handle}%20since_time%3A{sinceTime}&queryType=Latest
+#
+#     Without it each tick calls last_tweets, which serves a fixed 20-post page
+#     and bills for all of it (~300 credits, ~$8.64/month at this cron). With
+#     it the query is bounded to the window the watcher would actually act on,
+#     so a quiet tick costs ~15 credits (~$0.43/month). Measured, not estimated.
+#
+#   Variables (optional): X_HANDLE (default ChentoTrades), X_HORIZON_HOURS
+#     (default 12), X_ENTRY_FLOOR, X_MAX_AGE_MIN, X_STALE_MIN, XAPI_BASE.
+#
+# Test the wiring without spending anything: Actions → Follow watch → Run
+# workflow → set "test" to true. That path sends a canned alert and returns
+# before the X API is ever contacted, so it proves Telegram delivery for free.
 
 on:
   schedule:
