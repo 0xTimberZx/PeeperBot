@@ -21,6 +21,7 @@ import type { Tweet } from "./tweetSource.js";
 import { parseCall, type CallKind, type Side, type TradeCall } from "./parseCall.js";
 import type { LevelReading } from "./parseLevels.js";
 import { ANY_VENUE, blockReason, type VenueSpec } from "./venue.js";
+import { counterTrade, formatCounterTrade } from "./counterTrade.js";
 
 export interface WatchParams {
   /** Minimum parse confidence to alert on an entry. */
@@ -193,6 +194,7 @@ export function formatSignal(sig: TraderSignal, params: WatchParams, ctx: Format
   const { call, tweet, ageMin, stale } = sig;
   const handle = `@${tweet.authorHandle}`;
   const lines: string[] = [];
+  let counterLines: string[] = [];
 
   if (call.kind === "entry" && call.side) {
     const dir = copyDirection(call.side);
@@ -206,6 +208,19 @@ export function formatSignal(sig: TraderSignal, params: WatchParams, ctx: Format
       lines.push(`→ your play: ${params.horizonHours}h ${dir} $${call.symbol}`);
       const expiry = new Date(Date.now() + params.horizonHours * 3_600_000);
       lines.push(`   expires ~${expiry.toISOString().replace("T", " ").slice(0, 16)} UTC`);
+
+      // Where the other direction earns a look if this one starts failing
+      // inside the window. Decided now, while you're calm, rather than
+      // mid-drawdown — which is the only time it would otherwise get decided.
+      // Held back and emitted below the spot line: a trigger level reads as
+      // noise until you know where price is relative to it.
+      const counter = counterTrade(
+        call.side,
+        ctx.price,
+        ctx.nodes ?? [],
+        (ctx.levels ?? []).map((r) => r.level.value)
+      );
+      if (counter) counterLines = formatCounterTrade(counter, params.horizonHours, fmtPrice);
     }
   } else if (call.kind === "exit") {
     const what = call.side ? `${copyDirection(call.side)} ` : "";
@@ -219,6 +234,7 @@ export function formatSignal(sig: TraderSignal, params: WatchParams, ctx: Format
   if (ctx.price != null) {
     lines.push(`   ${ctx.pair ?? call.symbol} now ${fmtPrice(ctx.price)}`);
   }
+  lines.push(...counterLines);
 
   // The levels he named, each placed against where price is right now and
   // against the volume shelves. Labels stay factual (above/below) rather than

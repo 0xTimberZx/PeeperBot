@@ -295,6 +295,36 @@ placed against the high-volume nodes from the same profiler `peeperbot vprofile`
 and the entry autopsy use. A level marked ◆ means his level and the market's
 volume magnet agree — that's the confluence worth acting on.
 
+### The counter-trade line
+
+Every executable entry also carries where the *opposite* direction earns a look
+if his call starts failing inside your window:
+
+```
+   ↩ if it turns: 12h SHORT once price loses 92,380
+     that shelf holds 18% of traded volume — giving it up is the first real crack
+     room to 90,100, the next shelf
+     his own invalidation sits at 91,000, past that level
+     a fresh 12h bet, not a hedge — two binaries both pay the fee
+```
+
+The logic is the volume profile's, not a forecast. Price sits on shelves where
+real size traded and travels between them once a shelf goes, so a long's first
+structural crack is losing the nearest shelf **below** spot, and the room that
+failure has to run is the next shelf down. A short mirrors it — the level is the
+nearest shelf **above**, and it fails when price takes it back.
+
+**It is deliberately not a hedge, and the alert says so.** On a fixed-payout
+binary an opposite position is a second independent ticket: holding both
+directions over one window doesn't cancel out, it pays the fee twice and nets
+negative. What this marks is the level at which a *fresh* position the other way
+has structure behind it. The point of deciding it now is that the alternative is
+deciding it mid-drawdown.
+
+It stays silent when there's no price or no shelf on the failing side — an
+invented level is worse than none for something meant to be acted on under
+pressure.
+
 **Reading the post is not optional.** This is a text parser, not a fill, so the
 verbatim post and its link are always in the alert. The parser is tuned hard
 toward silence rather than coverage:
