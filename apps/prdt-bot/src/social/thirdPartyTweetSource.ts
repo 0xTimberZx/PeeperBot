@@ -61,9 +61,15 @@ export class ThirdPartyTweetSource implements TweetSource {
   }
 
   async fetchRecent(query: TweetQuery): Promise<Tweet[]> {
+    // {sinceTime} / {sinceId} let a time bound be expressed wherever the
+    // provider wants it — including inside a search query string, which is how
+    // twitterapi.io does it (`since_time:` is an operator, not a parameter, so
+    // no amount of appending &since_id= would have worked).
     let path = (this.cfg.path ?? DEFAULT_PATH)
       .replace("{handle}", encodeURIComponent(query.handle))
-      .replace("{limit}", String(query.limit));
+      .replace("{limit}", String(query.limit))
+      .replace("{sinceTime}", String(query.sinceTime ?? 0))
+      .replace("{sinceId}", encodeURIComponent(query.sinceId ?? ""));
 
     // Ask for only what's new, when the provider's parameter name is known.
     if (this.cfg.sinceParam && query.sinceId) {

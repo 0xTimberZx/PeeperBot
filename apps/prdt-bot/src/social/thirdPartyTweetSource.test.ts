@@ -50,6 +50,20 @@ describe("request shape", () => {
     expect((init.headers as Record<string, string>)["Authorization"]).toBe("Bearer k");
   });
 
+  it("substitutes a time bound into a search query — how twitterapi.io wants it", async () => {
+    // since_time is a SEARCH OPERATOR, not a query parameter, so appending
+    // &since_id= could never have worked. The template placeholder is what
+    // lets the bound land inside the query string.
+    const spy = mockJson({ tweets: [] });
+    await src({
+      path: "/twitter/tweet/advanced_search?query=from%3A{handle}%20since_time%3A{sinceTime}&queryType=Latest",
+    }).fetchRecent({ handle: "ChentoTrades", limit: 10, sinceTime: 1790254860 });
+    expect(spy.mock.calls[0]![0]).toBe(
+      "https://api.example.io/twitter/tweet/advanced_search" +
+        "?query=from%3AChentoTrades%20since_time%3A1790254860&queryType=Latest"
+    );
+  });
+
   it("does not send a since parameter until its name is configured", async () => {
     const spy = mockJson({ tweets: [] });
     await src().fetchRecent({ handle: "a", limit: 5, sinceId: "999" });
@@ -270,5 +284,25 @@ describe("against twitterapi.io's real response", () => {
   it("does not mistake isReply:false / inReplyToId:null for a reply", async () => {
     mockJson(live);
     expect((await src().fetchRecent({ handle: "a", limit: 5 }))[0]!.isReply).toBe(false);
+  });
+});
+
+describe("advanced_search response", () => {
+  it("takes the top-level tweets array, ignoring the paging keys beside it", async () => {
+    mockJson({
+      tweets: [{ id: "1", text: "Long $BTC here", createdAt: "Thu Sep 24 12:55:57 +0000 2026" }],
+      has_next_page: true,
+      next_cursor: "abc",
+    });
+    const out = await src().fetchRecent({ handle: "ChentoTrades", limit: 10 });
+    expect(out).toHaveLength(1);
+    expect(out[0]!.text).toBe("Long $BTC here");
+  });
+
+  it("normalizes an empty search window to no posts", async () => {
+    // The steady state once the query is time-bounded: he hasn't posted since
+    // the last poll, so there is nothing to return and nothing to pay for.
+    mockJson({ tweets: [], has_next_page: false, next_cursor: "" });
+    expect(await src().fetchRecent({ handle: "a", limit: 10 })).toEqual([]);
   });
 });
