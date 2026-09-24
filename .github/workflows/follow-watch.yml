@@ -22,7 +22,12 @@ name: Follow watch
 
 on:
   schedule:
-    - cron: "*/5 * * * *" # GitHub's floor; expect 5-15 min in practice
+    # Every 15 min, not GitHub's 5-min floor — this is a spending decision.
+    # twitterapi.io serves a fixed 20-post page and ignores the count
+    # parameter, so each tick costs ~300 credits whatever X_FETCH_LIMIT says:
+    # */5 is ~$26/month, */15 is ~$9. On a 12h horizon the extra latency is
+    # immaterial, and the alert states how late you are either way.
+    - cron: "*/15 * * * *"
   workflow_dispatch:
     inputs:
       handle: { description: "X handle to follow (no @)", required: false }
