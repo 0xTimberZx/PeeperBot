@@ -16,12 +16,15 @@ import { FileTweetSource } from "./fileTweetSource.js";
 import { ThirdPartyTweetSource } from "./thirdPartyTweetSource.js";
 import { TweetSourceUnavailableError, type TweetSource } from "./tweetSource.js";
 import { parseLevels, readLevels } from "./parseLevels.js";
+import { FollowJournal, type FollowedCall } from "./followJournal.js";
+import { blockReason, venueFromEnv } from "./venue.js";
 import {
   DEFAULT_WATCH_PARAMS,
   evaluate,
   formatSignal,
   trimSeen,
   type FormatContext,
+  type TraderSignal,
   type WatchParams,
   type WatchState,
 } from "./traderWatch.js";
@@ -42,17 +45,24 @@ export interface FollowLoopConfig {
   profileCandles: number;
   /** How many high-volume nodes to report. */
   profileNodes: number;
+  /** Where every surfaced call is recorded so his edge can be measured later.
+   *  null disables journaling — which also means you can never find out
+   *  whether copying him works. */
+  journalPath: string | null;
 }
 
 export class TraderFollowWatcher {
   private running = false;
   private state: WatchState = { seenIds: [] };
+  private readonly journal: FollowJournal | null;
 
   constructor(
     private readonly cfg: FollowLoopConfig,
     private readonly source: TweetSource,
     private readonly dispatcher: AlertDispatcher
-  ) {}
+  ) {
+    this.journal = cfg.journalPath ? new FollowJournal(cfg.journalPath) : null;
+  }
 
   /** One poll. Exposed for tests with an injected source and clock. */
   async tick(now: number): Promise<void> {
@@ -89,6 +99,7 @@ export class TraderFollowWatcher {
         kind: "info",
       };
       await this.dispatcher.dispatch(alert);
+      this.record(sig, ctx, now);
     }
 
     if (seen.length > 0) {
@@ -97,6 +108,40 @@ export class TraderFollowWatcher {
     }
     if (signals.length === 0) {
       console.log(`[follow] ${tweets.length} post(s) checked · nothing actionable`);
+    }
+  }
+
+  /**
+   * Record the call as pure intent, at the moment you could first have acted.
+   * Journaling on ALERT rather than on execution is what makes the later
+   * report a measurement of him instead of a measurement of your nerve.
+   *
+   * Best-effort: a journal write must never take down the watcher, since the
+   * alert (the thing you actually need) has already gone out by this point.
+   */
+  private record(sig: TraderSignal, ctx: FormatContext, now: number): void {
+    if (!this.journal || !sig.call.side) return;
+    const entry: FollowedCall = {
+      ts: now,
+      handle: this.cfg.handle,
+      tweetId: sig.tweet.id,
+      tweetUrl: sig.tweet.url,
+      symbol: sig.call.symbol,
+      side: sig.call.side,
+      kind: sig.call.kind,
+      confidence: sig.call.confidence,
+      ageMin: sig.ageMin,
+      horizonHours: this.cfg.params.horizonHours,
+      entryPrice: ctx.price ?? null,
+      pair: ctx.pair ?? null,
+      tradeable:
+        blockReason(this.cfg.params.venue, sig.call.symbol, this.cfg.params.horizonHours) === null,
+      levels: (ctx.levels ?? []).map((l) => l.level.value),
+    };
+    try {
+      this.journal.append(entry);
+    } catch (err) {
+      console.error("[follow] could not journal call:", (err as Error).message);
     }
   }
 
@@ -194,6 +239,27 @@ export class TraderFollowWatcher {
   }
 }
 
+/**
+ * Spot at a past instant, from the exchange feed — the settlement price the
+ * report scores against. Takes the close of the 1m candle covering `ts`,
+ * which is the same granularity a binary venue settles on.
+ *
+ * Returns null rather than throwing when the feed can't answer, so one
+ * unreachable settlement marks a single call unscorable instead of failing
+ * the whole report.
+ */
+export function makePriceAt(): (pair: string, ts: number) => Promise<number | null> {
+  return async (pair, ts) => {
+    try {
+      const candles = await fetchKlines({ symbol: pair, interval: "1m", limit: 2, endTime: ts });
+      const last = candles[candles.length - 1];
+      return last ? last.close : null;
+    } catch {
+      return null;
+    }
+  };
+}
+
 function num(name: string, def: number): number {
   const raw = process.env[name];
   return raw && raw.trim() !== "" && !Number.isNaN(Number(raw)) ? Number(raw) : def;
@@ -242,6 +308,7 @@ export function followConfigFromEnv(overrides: Partial<FollowLoopConfig> = {}): 
     profileInterval: str("X_PROFILE_INTERVAL", "15m") as Interval,
     profileCandles: num("X_PROFILE_CANDLES", 480), // ≈5 days of 15m
     profileNodes: num("X_PROFILE_NODES", 3),
+    journalPath: str("X_JOURNAL_PATH", "./data/follow-journal.jsonl"),
     params: {
       ...DEFAULT_WATCH_PARAMS,
       entryFloor: num("X_ENTRY_FLOOR", DEFAULT_WATCH_PARAMS.entryFloor),
@@ -253,9 +320,31 @@ export function followConfigFromEnv(overrides: Partial<FollowLoopConfig> = {}): 
       skipRetweets: bool("X_SKIP_RETWEETS", DEFAULT_WATCH_PARAMS.skipRetweets),
       includeExits: bool("X_INCLUDE_EXITS", DEFAULT_WATCH_PARAMS.includeExits),
       extraSymbols: extra,
+      venue: venueFromEnv(),
+      venueMode: str("X_VENUE_MODE", "flag") === "skip" ? "skip" : "flag",
     },
     ...overrides,
   };
+}
+
+/**
+ * Warn at startup about a configuration the venue can't honour, rather than
+ * letting every alert quietly advise a position that can't be written.
+ * Returns the warnings so the CLI can print them once.
+ */
+export function venueWarnings(cfg: FollowLoopConfig): string[] {
+  const out: string[] = [];
+  const { venue, horizonHours } = cfg.params;
+  if (horizonHours > venue.maxHorizonHours) {
+    out.push(
+      `${venue.name} caps a position at ${venue.maxHorizonHours}h but X_HORIZON_HOURS=${horizonHours}. ` +
+        `Every entry alert will be marked not-executable until you lower it.`
+    );
+  }
+  if (venue.assets.length > 0) {
+    out.push(`${venue.name} executes ${venue.assets.join("/")} only — calls on anything else are context only.`);
+  }
+  return out;
 }
 
 function sleep(ms: number, keepGoing: () => boolean): Promise<void> {

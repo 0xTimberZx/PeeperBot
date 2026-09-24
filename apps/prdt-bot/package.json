@@ -23,6 +23,7 @@
     "log": "tsx src/cli.ts log",
     "autopsy": "tsx src/cli.ts autopsy",
     "follow": "tsx src/cli.ts follow",
+    "followreport": "tsx src/cli.ts followreport",
     "report": "tsx src/cli.ts report",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit",

@@ -318,6 +318,72 @@ seen and skipped. **`X_STALE_MIN`** (default 30) still alerts but flags you as
 late, with the delay stated, because on a 12h horizon entering 45 minutes behind
 him is your call to make, not the bot's.
 
+### The venue decides what's executable — and what the real bar is
+
+The watcher is pointed at an execution venue (default **Overtime/Thales Speed
+Markets**, single). That venue settles two things the post can't:
+
+**What you can trade.** Speed Markets writes **BTC and ETH only**, 1 minute to
+24 hours. So a `$SOL` call from him is context, not a trade — the alert says so
+outright and prints no action line, rather than sending you hunting for a
+market that doesn't exist:
+
+```
+@ChentoTrades opened SHORT $SOL
+⛔ NOT EXECUTABLE — Speed Markets trades BTC/ETH only — $SOL isn't executable here
+   context only; no position to open here
+```
+
+Set `X_VENUE_MODE=skip` to stay silent on those instead, or `VENUE=any` to drop
+gating entirely and run the watcher as a pure feed.
+
+**What win rate merely breaks even.** This is the number that decides whether
+copying anyone is worth doing, and it is *not* 50%. Speed Markets pays 2x gross,
+but the LP fee (~10% in the 2h–24h band, higher for shorter holds) and a fixed
+2% protocol fee come off every ticket, win or lose:
+
+```
+2 × (1 − 0.10 − 0.02) = 1.76×  ⇒  breakeven = 1 / 1.76 ≈ 56.8%
+```
+
+**He has to be directionally right ~57% of the time on a 12h horizon for this to
+make money.** A 54% hit rate reads like winning and loses. Fees move — override
+`VENUE_LP_FEE` / `VENUE_PAYOUT` when the venue republishes them.
+
+### Does copying him actually work? (`peeperbot followreport`)
+
+The watcher reads his posts; it doesn't score him. So every call it surfaces is
+journaled as **pure intent** — direction, the strike price at alert time, when
+it settles — and outcomes are recomputed from price on every report run, never
+stored (the same convention `peeperbot log` / `autopsy` use).
+
+```bash
+npm run bot:followreport            # calls you could execute — your actual P&L
+npm run bot:followreport -- --all   # include untradeable ones — judges him, not your P&L
+```
+
+```
+═══ Follow report ═══
+@ChentoTrades · Speed Markets · payout 1.760× after fees ⇒ breakeven 56.8%
+
+Settled 62 (37W / 25L)  ·  win rate 59.7%
+Breakeven 56.8%  ·  edge +2.9%
+ROI per trade +5.0% of stake
+
+⚠️  n=62, but the gap to breakeven is inside the noise band.
+This is "not yet distinguishable from a coin flip", not "it works".
+
+By asset:        $BTC  44 settled  61.4%   $ETH  18 settled  55.6%
+By timeliness:   on time  51 settled  62.7%   late (>30m)  11 settled  45.5%
+```
+
+Two deliberate choices. Calls are journaled **when the bot alerts**, not when
+you trade — otherwise the record measures your nerve rather than his calling.
+And the report refuses to call a small sample a result: under 30 settled it says
+so, and past that it checks the gap to breakeven against sampling noise before
+claiming anything. The failure mode of every copy-trade experiment is stopping
+the measurement at n=7 and believing whichever answer it gave.
+
 **Reading X costs money.** X's own API is $200/mo for timeline reads, so the
 default is a third-party reseller (twitterapi.io, socialdata.tools) at cents per
 thousand reads — set `XAPI_KEY`. These are unofficial and can change their JSON
@@ -432,6 +498,9 @@ src/
     parseCall.ts           post → asset + direction + entry/exit/update
     parseLevels.ts         post → the price levels he named, vs spot & volume shelves
     traderWatch.ts         which calls are worth waking you for + the alert body
+    venue.ts               what your venue can execute + its fee-adjusted breakeven
+    followJournal.ts       append-only record of surfaced calls (intent, never outcome)
+    scoreFollow.ts         did copying him clear breakeven? (recomputed each run)
     run.ts                 poll loop, seen-post latch, price/profile enrichment
   cli.ts                 backtest | run | report
 ```

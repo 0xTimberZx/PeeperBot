@@ -36,9 +36,12 @@ import {
   type Side,
 } from "./analysis/entryAutopsy.js";
 import { RegimeMonitor, regimeConfigFromEnv } from "./regime/run.js";
-import { TraderFollowWatcher, followConfigFromEnv, sourceFromEnv } from "./social/run.js";
+import { TraderFollowWatcher, followConfigFromEnv, sourceFromEnv, makePriceAt, venueWarnings } from "./social/run.js";
 import { FileTweetSource } from "./social/fileTweetSource.js";
 import { formatSignal, sampleSignal } from "./social/traderWatch.js";
+import { FollowJournal } from "./social/followJournal.js";
+import { scoreCalls, formatFollowReport } from "./social/scoreFollow.js";
+import { breakevenWinRate } from "./social/venue.js";
 import { PrdtTradeStore } from "./journal/prdtStore.js";
 import {
   evaluateTrade,
@@ -846,6 +849,12 @@ async function cmdFollow(flags: Map<string, string>): Promise<void> {
   if (flags.get("floor")) loop.params.entryFloor = Number(flags.get("floor"));
   if (flags.get("poll")) loop.pollSeconds = Number(flags.get("poll"));
 
+  for (const w of venueWarnings(loop)) console.log(`[follow] ${w}`);
+  console.log(
+    `[follow] ${loop.params.venue.name} breakeven ${(breakevenWinRate(loop.params.venue) * 100).toFixed(1)}%` +
+      ` — he has to beat that for copying him to make money`
+  );
+
   // --test: prove the wiring end-to-end (parse → format → your phone) with a
   // canned call, no provider credits spent and no waiting for him to post.
   if (flags.get("test") === "true") {
@@ -891,6 +900,36 @@ async function cmdFollow(flags: Map<string, string>): Promise<void> {
   await watcher.start();
 }
 
+/**
+ * Score the follow journal: does copying him actually clear the venue's
+ * breakeven? Outcomes are recomputed from price on every run, never stored.
+ */
+async function cmdFollowReport(flags: Map<string, string>): Promise<void> {
+  const loop = followConfigFromEnv();
+  const path = flags.get("journal") ?? loop.journalPath;
+  if (!path) {
+    console.log("No journal path configured — set X_JOURNAL_PATH to record calls.");
+    return;
+  }
+
+  const calls = new FollowJournal(path).readAll();
+  if (calls.length === 0) {
+    console.log(
+      `No calls journaled yet at ${path}.\n` +
+        `Run \`npm run bot:follow -- --once\` a few times; every alert it surfaces is recorded here.`
+    );
+    return;
+  }
+
+  const report = await scoreCalls(calls, loop.params.venue, Date.now(), makePriceAt(), {
+    // --all scores calls you couldn't execute too, which measures his calling
+    // rather than your P&L. Useful for judging him, not for judging the copy.
+    tradeableOnly: flags.get("all") !== "true",
+    staleMin: loop.params.staleMin,
+  });
+  console.log("\n" + formatFollowReport(report) + "\n");
+}
+
 async function main(): Promise<void> {
   const [, , cmd, ...rest] = process.argv;
   const flags = parseFlags(rest);
@@ -934,6 +973,9 @@ async function main(): Promise<void> {
     case "follow":
       await cmdFollow(flags);
       break;
+    case "followreport":
+      await cmdFollowReport(flags);
+      break;
     case "report":
       await cmdReport();
       break;
@@ -966,6 +1008,10 @@ async function main(): Promise<void> {
           `                     # watch a trader's X posts; page you when he opens a position, with the\n` +
           `                     # levels he named placed against price + the high-volume shelves.\n` +
           `                     # --once for a cron tick · --test to ping your phone · --fixture f.json to replay\n` +
+          `  peeperbot followreport [--all] [--journal path.jsonl]\n` +
+          `                     # did copying him clear your venue's breakeven? win rate vs the fee-adjusted\n` +
+          `                     # bar, sliced by asset / timeliness / parse confidence. --all includes calls\n` +
+          `                     # you couldn't execute (judges him, not your P&L)\n` +
           `  peeperbot report    # performance report from the journal\n\n` +
           `Strategies: ${listStrategies().join(", ")}\n`
       );

@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { DEFAULT_WATCH_PARAMS, evaluate, formatSignal, trimSeen, type WatchState } from "./traderWatch.js";
 import type { Tweet } from "./tweetSource.js";
+import { SPEED_MARKETS } from "./venue.js";
 
 const NOW = Date.UTC(2026, 8, 24, 12, 0, 0);
 const empty: WatchState = { seenIds: [] };
@@ -120,5 +121,42 @@ describe("trimSeen", () => {
     const kept = trimSeen(ids, 300);
     expect(kept).toHaveLength(300);
     expect(kept[kept.length - 1]).toBe("399");
+  });
+});
+
+describe("venue gating", () => {
+  const speedMarkets = { ...DEFAULT_WATCH_PARAMS, venue: SPEED_MARKETS };
+
+  it("flags an entry you cannot execute, without inventing an action line", () => {
+    const post = tweet({ text: "Longing $SOL here" });
+    const [sig] = evaluate([post], empty, speedMarkets, NOW).signals;
+    expect(sig!.blocked).toMatch(/BTC\/ETH only/);
+    const body = formatSignal(sig!, speedMarkets);
+    expect(body).toMatch(/NOT EXECUTABLE/);
+    expect(body).not.toMatch(/your play/); // never send someone hunting a market that isn't there
+  });
+
+  it("still gives the full play for a tradeable asset", () => {
+    const [sig] = evaluate([tweet()], empty, speedMarkets, NOW).signals;
+    expect(sig!.blocked).toBeNull();
+    expect(formatSignal(sig!, speedMarkets)).toMatch(/your play: 12h LONG/);
+  });
+
+  it("can stay silent on untradeable calls instead", () => {
+    const post = tweet({ text: "Longing $SOL here" });
+    const params = { ...speedMarkets, venueMode: "skip" as const };
+    expect(evaluate([post], empty, params, NOW).signals).toHaveLength(0);
+  });
+
+  it("does not gate exits — he is closing, not asking you to open", () => {
+    const post = tweet({ text: "closed my $SOL long" });
+    const [sig] = evaluate([post], empty, speedMarkets, NOW).signals;
+    expect(sig!.blocked).toBeNull();
+  });
+
+  it("blocks a horizon longer than the venue will write", () => {
+    const params = { ...speedMarkets, horizonHours: 48 };
+    const [sig] = evaluate([tweet()], empty, params, NOW).signals;
+    expect(sig!.blocked).toMatch(/caps a position at 24h/);
   });
 });

@@ -29,6 +29,7 @@ npm run bot:regime                     # macro radar: BrokerForce regime + new C
 npm run bot:watch                      # alert when CORE nears its multi-month pivot-low floor
 npm run bot:check -- --symbol BTCUSDT   # pre-entry "am I chasing, or is it coiled?" check
 npm run bot:follow -- --test           # follow a trader's X calls; ping you to open the same direction
+npm run bot:followreport               # does copying him clear your venue's breakeven? (~57% on Speed Markets)
 ```
 
 **On "95/100":** PRDT Pro pays a fixed ~1.9×, so breakeven is ~52.6% and a
