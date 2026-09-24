@@ -52,6 +52,9 @@ export interface FollowLoopConfig {
   /** What one returned post costs, for the running spend estimate.
    *  twitterapi.io: 15 credits ($0.00015). Purely for reporting. */
   creditsPerPost: number;
+  /** Credits per US dollar, for turning the estimate into money.
+   *  twitterapi.io: 100,000. */
+  creditsPerUsd: number;
 }
 
 export class TraderFollowWatcher {
@@ -157,6 +160,30 @@ export class TraderFollowWatcher {
         (repeats > 0 ? `, ${repeats} already seen` : "") +
         ` · ~${creditsNow} credits this poll · ~${creditsTotal} since this state file began`
     );
+
+    // Project the run rate. A per-poll credit count is abstract; "$26/month"
+    // is a decision. Uses the observed page size, because the requested limit
+    // is not necessarily what you get billed for — see below.
+    if (this.cfg.pollSeconds > 0 && tweets.length > 0) {
+      const perDay = Math.round((86_400 / this.cfg.pollSeconds) * creditsNow);
+      const usdMonth = ((perDay * 30) / this.cfg.creditsPerUsd).toFixed(2);
+      console.log(
+        `[follow] at X_POLL_SECONDS=${this.cfg.pollSeconds} that runs ~${perDay.toLocaleString("en-US")} ` +
+          `credits/day (~$${usdMonth}/month)`
+      );
+    }
+
+    // twitterapi.io's last_tweets serves a fixed page (20) and ignores the
+    // count parameter, so X_FETCH_LIMIT cannot reduce what you are billed
+    // there. Worth saying out loud: a knob documented as a cost lever that
+    // silently does nothing is how someone budgets for $6 and spends $26.
+    if (tweets.length > this.cfg.fetchLimit) {
+      console.log(
+        `[follow] provider returned ${tweets.length} posts for a requested limit of ${this.cfg.fetchLimit} — ` +
+          `it ignores the count parameter, so X_FETCH_LIMIT is not a cost lever here. ` +
+          `Poll interval and XAPI_SINCE_PARAM are the ones that work.`
+      );
+    }
 
     if (repeats > 0 && repeats === tweets.length && !process.env.XAPI_SINCE_PARAM) {
       console.log(
@@ -363,14 +390,17 @@ export function followConfigFromEnv(overrides: Partial<FollowLoopConfig> = {}): 
 
   return {
     handle: str("X_HANDLE", "ChentoTrades").replace(/^@/, ""),
-    // These two defaults are a BUDGET, not a latency choice. Providers bill
-    // per post returned (~15 credits each), so 20 posts every 2 minutes runs
-    // to roughly $65/month and drains a starter balance in about an hour.
-    // 10 posts every 5 minutes is ~$6/month and costs nothing on a 12h
-    // horizon — the alert already tells you how late you are. Raise them only
-    // if you've checked what it spends.
+    // A BUDGET, not a latency choice — and poll interval is the only half of
+    // it that reliably works. A live run showed twitterapi.io serving a fixed
+    // 20-post page and ignoring the count parameter, so fetchLimit does not
+    // reduce the bill there: every poll costs 20 x 15 = 300 credits whatever
+    // you ask for. That makes the arithmetic 288 polls/day at 5 minutes
+    // (~$26/month) versus 96 at 15 (~$9). The trader being followed posts
+    // roughly five times a day, and on a 12h horizon a quarter hour of
+    // latency is immaterial — the alert states how late you are regardless.
+    // fetchLimit is kept because other providers do honour it.
     fetchLimit: num("X_FETCH_LIMIT", 10),
-    pollSeconds: num("X_POLL_SECONDS", 300),
+    pollSeconds: num("X_POLL_SECONDS", 900),
     statePath: str("X_STATE_PATH", "./data/follow-state.json"),
     priceLookup: bool("X_PRICE_LOOKUP", true),
     profileInterval: str("X_PROFILE_INTERVAL", "15m") as Interval,
@@ -378,6 +408,7 @@ export function followConfigFromEnv(overrides: Partial<FollowLoopConfig> = {}): 
     profileNodes: num("X_PROFILE_NODES", 3),
     journalPath: str("X_JOURNAL_PATH", "./data/follow-journal.jsonl"),
     creditsPerPost: num("XAPI_CREDITS_PER_POST", 15),
+    creditsPerUsd: num("XAPI_CREDITS_PER_USD", 100_000),
     params: {
       ...DEFAULT_WATCH_PARAMS,
       entryFloor: num("X_ENTRY_FLOOR", DEFAULT_WATCH_PARAMS.entryFloor),
