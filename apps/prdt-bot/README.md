@@ -256,6 +256,75 @@ it can't be win-rate-validated. It exists to bring *you* in at the moment your
 setup occurs; the trade decision stays yours. All thresholds are env-tunable
 (see `.env.example`).
 
+## Follow a trader's X calls (`peeperbot follow`)
+
+Watches a handle's X posts and pings you when he **opens a position**, so you
+can put on the same direction for your own horizon (default 12h). It never
+trades — a human reads the post and places the order.
+
+```bash
+npm run bot:follow -- --test                      # prove the ping reaches your phone
+npm run bot:follow -- --handle ChentoTrades       # live loop, polls every 2 min
+npm run bot:follow -- --once                      # a single cron tick
+npm run bot:follow -- --fixture data/tweets-fixture.example.json --once   # replay, no API spend
+```
+
+A typical alert:
+
+```
+@ChentoTrades opened LONG $BTC
+→ your play: 12h LONG $BTC
+   expires ~2026-09-24 23:49 UTC
+   BTCUSDT now 93,120
+
+   his levels:
+   · 91,000 (wrote "91k")   −2.3% below  · nearest shelf 92,380 (1.5% off)
+   · 92,400 (wrote "92.4k") −0.8% below  ◆ sits ON a volume shelf (18% of traded vol)
+   · 97,000 (wrote "97k")   +4.2% above  · nearest shelf 96,500 (0.5% off)
+   volume map: 92,380 (18%) · 96,500 (9%) · 94,100 (7%)
+
+   read 95% confident · posted just now
+
+"Long $BTC here. Bidding 92.4k, invalidation under 91k, first target 97k."
+https://x.com/ChentoTrades/status/...
+```
+
+**The levels come from his post, the shelves come from the market.** Numbers he
+writes are normalized against spot (traders write `93.5` for `93,500`), then
+placed against the high-volume nodes from the same profiler `peeperbot vprofile`
+and the entry autopsy use. A level marked ◆ means his level and the market's
+volume magnet agree — that's the confluence worth acting on.
+
+**Reading the post is not optional.** This is a text parser, not a fill, so the
+verbatim post and its link are always in the alert. The parser is tuned hard
+toward silence rather than coverage:
+
+| Post | Result |
+|---|---|
+| `Long $BTC here` | **entry** — pages you |
+| `$BTC long here` | **entry** — ticker-first phrasing works too |
+| `Long $BTC, short $ETH` | **two entries**, each bound to its own ticker |
+| `closed my $BTC long` | **exit** — heads-up if you hold the copy |
+| `still long $ETH from 3100` | **update** — he's reporting, not entering |
+| `bullish btc` | silent — commentary scores below the entry floor |
+| `thinking about a long on $SOL` | silent — a musing is not a position |
+| `not longing this chop` | silent — negated |
+| `who's long $BTC here?` | silent — a question |
+| `I was long $BTC last week` | silent as an entry — past tense |
+
+Two guards worth knowing about. **`X_MAX_AGE_MIN`** (default 180) means a first
+run never pages you about his whole back-timeline — anything older is latched as
+seen and skipped. **`X_STALE_MIN`** (default 30) still alerts but flags you as
+late, with the delay stated, because on a 12h horizon entering 45 minutes behind
+him is your call to make, not the bot's.
+
+**Reading X costs money.** X's own API is $200/mo for timeline reads, so the
+default is a third-party reseller (twitterapi.io, socialdata.tools) at cents per
+thousand reads — set `XAPI_KEY`. These are unofficial and can change their JSON
+shape, so the adapter reads fields by alias and fails loudly rather than going
+quietly silent, which on a copy-trade watcher is indistinguishable from "he
+hasn't posted." `XSOURCE=file` replays a fixture with no key at all.
+
 ## Always-on phone alerts (scheduled GitHub Actions)
 
 Both radars run **24/7 with no Codespace open** via two scheduled workflows in
@@ -266,6 +335,7 @@ pushes a Telegram message to your phone only when there's something to say:
 |---|---|---|
 | **Regime watch** | `regime-watch.yml` | Core/BTC/ratio breaks a new high or low, or a BrokerForce vol-regime shifts |
 | **CORE-bottom watch** | `core-bottom-watch.yml` | CORE nears its multi-month pivot-low band **and** the drop is market-wide (BTC down too) |
+| **Follow watch** | `follow-watch.yml` | a followed trader opens (or closes) a position on X — every 5 min, the scheduler's floor |
 
 **Why a cron and not a long-running loop:** a Codespace suspends after ~30 min
 idle and kills any foreground process. Both monitors are also **stateful** — the
@@ -355,5 +425,13 @@ src/
   execution.ts           dry-run (default) + guarded on-chain executor
   brokerforce/           read-only volatility-vs-norm overlay
   analysis/              performance + counterfactual reports
+  social/                follow a trader's X calls:
+    tweetSource.ts         source-agnostic reader interface
+    thirdPartyTweetSource.ts  reseller adapter (twitterapi.io & co)
+    fileTweetSource.ts     fixture replay — no API key, no spend
+    parseCall.ts           post → asset + direction + entry/exit/update
+    parseLevels.ts         post → the price levels he named, vs spot & volume shelves
+    traderWatch.ts         which calls are worth waking you for + the alert body
+    run.ts                 poll loop, seen-post latch, price/profile enrichment
   cli.ts                 backtest | run | report
 ```

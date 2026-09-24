@@ -1,0 +1,82 @@
+name: Follow watch
+
+# Polls a trader's X posts and pings Telegram when he opens a position, so you
+# can put on the same direction for your own horizon. It never trades.
+#
+# Reaction time: GitHub's scheduler has a 5-minute minimum and routinely runs
+# late under load, so treat this as "within ~5-15 minutes". That is fine for a
+# 12h hold and not fine for scalping — if you need to be on it in seconds, run
+# `npm run bot:follow` locally (or on a small VM) where the poll is 2 minutes
+# and nothing throttles it.
+#
+# State: a cron process has no memory, so the seen-post latch lives in
+# apps/prdt-bot/data/follow-state.json and is carried between runs by
+# actions/cache. Without it every run re-alerts on the same post. Delete the
+# cache entry to reset (it will then ignore anything older than X_MAX_AGE_MIN,
+# so it still won't blast you with old calls).
+#
+# Set up once, under Settings → Secrets and variables → Actions:
+#   Secrets:   XAPI_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+#   Variables: X_HANDLE (default ChentoTrades), X_HORIZON_HOURS (default 12),
+#              X_ENTRY_FLOOR, XAPI_BASE — all optional.
+
+on:
+  schedule:
+    - cron: "*/5 * * * *" # GitHub's floor; expect 5-15 min in practice
+  workflow_dispatch:
+    inputs:
+      handle: { description: "X handle to follow (no @)", required: false }
+      horizon: { description: "Copy horizon in hours", required: false }
+      test: { description: "Send a sample alert and exit", required: false }
+
+concurrency:
+  group: follow-watch
+  cancel-in-progress: false
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Restore seen-post latch
+        uses: actions/cache/restore@v4
+        with:
+          path: apps/prdt-bot/data/follow-state.json
+          key: follow-state-${{ github.run_id }}
+          restore-keys: |
+            follow-state-
+      - name: Install dependencies
+        run: npm ci
+      - name: Poll (one-shot)
+        env:
+          FEED_SOURCE: okx
+          FEED_FALLBACKS: bybit
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          XSOURCE: thirdparty
+          XAPI_KEY: ${{ secrets.XAPI_KEY }}
+          XAPI_BASE: ${{ vars.XAPI_BASE }}
+          XAPI_PATH: ${{ vars.XAPI_PATH }}
+          XAPI_AUTH_HEADER: ${{ vars.XAPI_AUTH_HEADER }}
+          X_HANDLE: ${{ github.event.inputs.handle || vars.X_HANDLE }}
+          X_HORIZON_HOURS: ${{ github.event.inputs.horizon || vars.X_HORIZON_HOURS }}
+          X_ENTRY_FLOOR: ${{ vars.X_ENTRY_FLOOR }}
+          X_MAX_AGE_MIN: ${{ vars.X_MAX_AGE_MIN }}
+          X_STALE_MIN: ${{ vars.X_STALE_MIN }}
+          X_EXTRA_SYMBOLS: ${{ vars.X_EXTRA_SYMBOLS }}
+        run: |
+          if [ "${{ github.event.inputs.test }}" = "true" ]; then
+            npm run follow --workspace=apps/prdt-bot -- --test
+          else
+            npm run follow --workspace=apps/prdt-bot -- --once
+          fi
+      - name: Save seen-post latch
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: apps/prdt-bot/data/follow-state.json
+          key: follow-state-${{ github.run_id }}

@@ -36,6 +36,9 @@ import {
   type Side,
 } from "./analysis/entryAutopsy.js";
 import { RegimeMonitor, regimeConfigFromEnv } from "./regime/run.js";
+import { TraderFollowWatcher, followConfigFromEnv, sourceFromEnv } from "./social/run.js";
+import { FileTweetSource } from "./social/fileTweetSource.js";
+import { formatSignal, sampleSignal } from "./social/traderWatch.js";
 import { PrdtTradeStore } from "./journal/prdtStore.js";
 import {
   evaluateTrade,
@@ -828,6 +831,66 @@ async function cmdReport(): Promise<void> {
   console.log("\n" + formatReport(report));
 }
 
+/**
+ * Follow a trader's X posts and page you when he opens a position, so you can
+ * put on the same direction for your own horizon. It never trades.
+ */
+async function cmdFollow(flags: Map<string, string>): Promise<void> {
+  const cfg = loadConfig();
+  const dispatcher = buildDispatcher(cfg);
+
+  const loop = followConfigFromEnv({
+    ...(flags.get("handle") ? { handle: flags.get("handle")!.replace(/^@/, "") } : {}),
+  });
+  if (flags.get("horizon")) loop.params.horizonHours = Number(flags.get("horizon"));
+  if (flags.get("floor")) loop.params.entryFloor = Number(flags.get("floor"));
+  if (flags.get("poll")) loop.pollSeconds = Number(flags.get("poll"));
+
+  // --test: prove the wiring end-to-end (parse → format → your phone) with a
+  // canned call, no provider credits spent and no waiting for him to post.
+  if (flags.get("test") === "true") {
+    const channels = dispatcher.channelNames;
+    console.log(`\n[follow] active alert channels: [${channels.join(", ")}]`);
+    if (!channels.includes("telegram")) {
+      console.log(
+        "[follow] ⚠️  Telegram is NOT configured — this will only print here, not reach your phone.\n" +
+          "          Add TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID to apps/prdt-bot/.env, then re-run."
+      );
+    }
+    const sig = sampleSignal(loop.handle);
+    await dispatcher.dispatch({
+      symbol: sig.call.symbol,
+      timeframeMin: loop.params.horizonHours * 60,
+      direction: "UP",
+      confidence: sig.call.confidence,
+      entryPrice: 0,
+      reason: formatSignal(sig, loop.params, {
+        price: 93_000,
+        pair: "BTCUSDT",
+        levels: [],
+        nodes: [{ price: 92_380, share: 0.18 }],
+      }),
+      strategy: `follow:${loop.handle}`,
+      live: false,
+      ts: Date.now(),
+      kind: "info",
+    });
+    return;
+  }
+
+  // --fixture replays posts from a file: how you check the parser against
+  // something he actually wrote without touching the provider.
+  const source = flags.get("fixture") ? new FileTweetSource(flags.get("fixture")!) : sourceFromEnv();
+
+  const watcher = new TraderFollowWatcher(loop, source, dispatcher);
+  if (flags.get("once") === "true") {
+    await watcher.runOnce();
+    return;
+  }
+  process.on("SIGINT", () => watcher.stop());
+  await watcher.start();
+}
+
 async function main(): Promise<void> {
   const [, , cmd, ...rest] = process.argv;
   const flags = parseFlags(rest);
@@ -868,6 +931,9 @@ async function main(): Promise<void> {
     case "autopsy":
       await cmdAutopsy(flags);
       break;
+    case "follow":
+      await cmdFollow(flags);
+      break;
     case "report":
       await cmdReport();
       break;
@@ -896,6 +962,10 @@ async function main(): Promise<void> {
           `                     # journal a PRDT trade you took (outcome is recomputed later, never stored)\n` +
           `  peeperbot autopsy   [--json]   # score every logged trade: win/loss, %-in-loss, shorten?, pivot/breakout,\n` +
           `                     #             session, vol-day + aggregate win rate sliced by each\n` +
+          `  peeperbot follow    [--handle ChentoTrades] [--horizon 12] [--floor 0.6] [--poll 120]\n` +
+          `                     # watch a trader's X posts; page you when he opens a position, with the\n` +
+          `                     # levels he named placed against price + the high-volume shelves.\n` +
+          `                     # --once for a cron tick · --test to ping your phone · --fixture f.json to replay\n` +
           `  peeperbot report    # performance report from the journal\n\n` +
           `Strategies: ${listStrategies().join(", ")}\n`
       );
