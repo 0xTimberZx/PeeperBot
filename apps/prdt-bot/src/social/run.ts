@@ -349,7 +349,7 @@ export function sourceFromEnv(): TweetSource {
       path: process.env.XAPI_PATH,
       authHeader: process.env.XAPI_AUTH_HEADER,
       sinceParam: process.env.XAPI_SINCE_PARAM,
-      timeoutMs: num("XAPI_TIMEOUT_MS", 10_000),
+      timeoutMs: num("XAPI_TIMEOUT_MS", 20_000),
     });
   }
   throw new Error(`Unknown XSOURCE="${kind}" — use "thirdparty" or "file"`);

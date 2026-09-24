@@ -195,3 +195,80 @@ describe("failure handling", () => {
     expect((err as Error).message).toMatch(/XAPI_KEY/);
   });
 });
+
+// Captured from a live twitterapi.io /twitter/user/last_tweets call. Until this
+// existed the adapter's field aliases were inference — it had never seen the
+// provider's actual response. Structure verbatim; long metadata trimmed.
+describe("against twitterapi.io's real response", () => {
+  const live = {
+    status: "success",
+    code: 0,
+    msg: "success",
+    data: {
+      pin_tweet: null,
+      tweets: [
+        {
+          type: "tweet",
+          id: "2103106160136200690",
+          url: "https://x.com/ChentoTrades/status/2103106160136200690",
+          twitterUrl: "https://twitter.com/ChentoTrades/status/2103106160136200690",
+          text: "I Don't make the rules\n\nTake another 10% https://t.co/0qxDh9H7g4",
+          source: "Twitter for iPhone",
+          retweetCount: 0,
+          replyCount: 4,
+          likeCount: 35,
+          quoteCount: 0,
+          viewCount: 5952,
+          createdAt: "Thu Sep 24 12:55:57 +0000 2026",
+          lang: "en",
+          bookmarkCount: 2,
+          isReply: false,
+          inReplyToId: null,
+          conversationId: "2103106160136200690",
+          inReplyToUserId: null,
+          inReplyToUsername: null,
+          author: {
+            type: "user",
+            userName: "ChentoTrades",
+            url: "https://x.com/ChentoTrades",
+            id: "1368637183125557252",
+            name: "Chento",
+            isBlueVerified: true,
+            followers: 95772,
+          },
+          quoted_tweet: { type: "tweet", id: "2103017477773103553", text: "quoted body" },
+        },
+      ],
+    },
+  };
+
+  it("finds the posts under data.tweets", async () => {
+    mockJson(live);
+    const out = await src().fetchRecent({ handle: "ChentoTrades", limit: 5 });
+    expect(out).toHaveLength(1); // one post, not the nested quoted_tweet as well
+  });
+
+  it("reads every field the alert depends on", async () => {
+    mockJson(live);
+    const [t] = await src().fetchRecent({ handle: "ChentoTrades", limit: 5 });
+    expect(t!.id).toBe("2103106160136200690");
+    expect(t!.text).toContain("Take another 10%");
+    expect(t!.authorHandle).toBe("ChentoTrades");
+    expect(t!.url).toBe("https://x.com/ChentoTrades/status/2103106160136200690");
+    expect(t!.isReply).toBe(false);
+    expect(t!.isRetweet).toBe(false);
+  });
+
+  it("parses their Twitter-classic timestamp rather than defaulting to now", async () => {
+    // A silent fallback to Date.now() would make every post look brand new and
+    // defeat both the staleness flag and the max-age cutoff.
+    mockJson(live);
+    const [t] = await src().fetchRecent({ handle: "ChentoTrades", limit: 5 });
+    expect(t!.createdAt).toBe(Date.parse("2026-09-24T12:55:57Z"));
+  });
+
+  it("does not mistake isReply:false / inReplyToId:null for a reply", async () => {
+    mockJson(live);
+    expect((await src().fetchRecent({ handle: "a", limit: 5 }))[0]!.isReply).toBe(false);
+  });
+});
