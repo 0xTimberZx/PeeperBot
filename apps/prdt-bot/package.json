@@ -21,6 +21,7 @@
     "poswatch": "tsx src/cli.ts poswatch",
     "vprofile": "tsx src/cli.ts vprofile",
     "leadlag": "tsx src/cli.ts leadlag",
+    "pivotfollow": "tsx src/cli.ts pivotfollow",
     "log": "tsx src/cli.ts log",
     "autopsy": "tsx src/cli.ts autopsy",
     "follow": "tsx src/cli.ts follow",

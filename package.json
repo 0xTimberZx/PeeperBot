@@ -20,6 +20,7 @@
     "bot:poswatch": "npm run poswatch --workspace=apps/prdt-bot --",
     "bot:vprofile": "npm run vprofile --workspace=apps/prdt-bot --",
     "bot:leadlag": "npm run leadlag --workspace=apps/prdt-bot --",
+    "bot:pivotfollow": "npm run pivotfollow --workspace=apps/prdt-bot --",
     "bot:log": "npm run log --workspace=apps/prdt-bot --",
     "bot:autopsy": "npm run autopsy --workspace=apps/prdt-bot --",
     "bot:follow": "npm run follow --workspace=apps/prdt-bot --",

@@ -36,6 +36,7 @@ import {
   type Side,
 } from "./analysis/entryAutopsy.js";
 import { analyzeLeadLag, formatLeadLag, DEFAULT_LEADLAG_PARAMS, type LeadLagParams } from "./analysis/leadLag.js";
+import { analyzePivotFollow, formatPivotFollow, DEFAULT_PIVOTFOLLOW_PARAMS, type PivotFollowParams } from "./analysis/pivotFollow.js";
 import { RegimeMonitor, regimeConfigFromEnv } from "./regime/run.js";
 import { TraderFollowWatcher, followConfigFromEnv, sourceFromEnv, makePriceAt, venueWarnings } from "./social/run.js";
 import { FileTweetSource } from "./social/fileTweetSource.js";
@@ -704,6 +705,61 @@ async function cmdVprofile(flags: Map<string, string>): Promise<void> {
 }
 
 /**
+ * Pivot-follow backtest: the lead asset (CORE by default) prints a swing pivot,
+ * wait `--wait` minutes, then hold BTC / ETH the same way for `--hold` minutes.
+ */
+async function cmdPivotFollow(flags: Map<string, string>): Promise<void> {
+  const cfg = loadConfig();
+  const lead = (flags.get("lead") ?? cfg.signalSymbol ?? "COREUSDT").toUpperCase();
+  const follows = (flags.get("follow") ?? "BTCUSDT,ETHUSDT").toUpperCase().split(",").filter((x) => x.length > 0);
+  const interval = (flags.get("bar") ?? "5m") as Interval;
+  const barMin = intervalMs(interval) / 60_000;
+  const days = Number(flags.get("days") ?? 60);
+  const count = Math.ceil((days * 1440) / barMin);
+  const bars = (min: number): number => Math.max(0, Math.round(min / barMin));
+  const params: PivotFollowParams = {
+    pivotStrength: Number(flags.get("pivot-strength") ?? DEFAULT_PIVOTFOLLOW_PARAMS.pivotStrength),
+    delayBars: bars(Number(flags.get("wait") ?? 30)),
+    holdBars: Math.max(1, bars(Number(flags.get("hold") ?? 35))),
+  };
+  const breakeven = 1 / cfg.payout;
+
+  const end = Date.now();
+  console.error(`[pivotfollow] fetching ${count} × ${interval} bars each for ${[lead, ...follows].join(", ")}…`);
+  const [leadCandles, ...followCandles] = await Promise.all(
+    [lead, ...follows].map((symbol) => fetchHistory({ symbol, interval, count, endTime: end }))
+  );
+
+  // Sensitivity: the same rule across wait times. An edge that only shows at
+  // one hand-picked delay is a fitted number, not an edge.
+  const waits = (flags.get("sweep") ?? "0,15,30,45,60").split(",").map(Number).filter((x) => x >= 0);
+  const cell = (b: { n: number; winRate: number }): string =>
+    b.n === 0 ? "—".padStart(16) : `${(b.winRate * 100).toFixed(1)}% (n=${b.n})`.padStart(16);
+  const results = follows.map((follow, k) => {
+    const candles = followCandles[k]!;
+    const report = analyzePivotFollow(leadCandles!, candles, params);
+    console.log("\n" + formatPivotFollow(report, { lead, follow, barMin, breakeven }));
+    const sweep = waits.map((waitMin) => {
+      const r = analyzePivotFollow(leadCandles!, candles, { ...params, delayBars: bars(waitMin) });
+      return { waitMin, all: r.all, held: r.byFate.held, ownPivots: r.ownPivots };
+    });
+    console.log(
+      `\n${follow} by wait time (win rate, breakeven ${(breakeven * 100).toFixed(1)}%)\n` +
+        `  ${"wait".padEnd(8)}${"all".padStart(16)}${"pivot held".padStart(16)}${"own pivots".padStart(16)}\n` +
+        sweep.map((s) => `  ${`${s.waitMin}m`.padEnd(8)}${cell(s.all)}${cell(s.held)}${cell(s.ownPivots)}`).join("\n") +
+        "\n"
+    );
+    return { follow, report, sweep };
+  });
+
+  if (flags.get("json") === "true") {
+    console.log("----- COPY BELOW (JSON) -----");
+    console.log(JSON.stringify({ lead, barMin, days, breakeven, generated: new Date(end).toISOString(), results }));
+    console.log("----- COPY ABOVE -----\n");
+  }
+}
+
+/**
  * Lead-lag backtest: does BTC settle the way a lead asset (CORE by default)
  * just moved, one window later — and does a fresh BTC pivot improve the odds?
  */
@@ -1053,6 +1109,9 @@ async function main(): Promise<void> {
     case "leadlag":
       await cmdLeadLag(flags);
       break;
+    case "pivotfollow":
+      await cmdPivotFollow(flags);
+      break;
     case "log":
       await cmdLog(flags);
       break;
@@ -1099,6 +1158,8 @@ async function main(): Promise<void> {
           `                     # --once for a cron tick · --test to ping your phone · --fixture f.json to replay\n` +
           `  peeperbot leadlag   [--lead COREUSDT] [--follow BTCUSDT] [--days 60] [--window 30] [--min-move 1]\n` +
           `                     # backtest: lead asset moves → does BTC follow one window later? (+BTC pivot filter)\n` +
+          `  peeperbot pivotfollow [--lead COREUSDT] [--follow BTCUSDT,ETHUSDT] [--days 60] [--wait 30] [--hold 35]\n` +
+          `                     # backtest: lead asset prints a pivot → wait → hold BTC/ETH the same way\n` +
           `  peeperbot followreport [--all] [--journal path.jsonl]\n` +
           `                     # did copying him clear your venue's breakeven? win rate vs the fee-adjusted\n` +
           `                     # bar, sliced by asset / timeliness / parse confidence. --all includes calls\n` +

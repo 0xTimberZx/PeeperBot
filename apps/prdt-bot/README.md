@@ -481,6 +481,28 @@ An *empty* collection is the one exception: that's a quiet timeline and
 normalizes to no posts, which is the steady state once `XAPI_SINCE_PARAM` is
 working. `XSOURCE=file` replays a fixture with no key at all.
 
+## Trade BTC/ETH off a CORE pivot (`peeperbot pivotfollow`)
+
+Tests one plan: CORE prints a swing pivot, you wait 30 minutes, then hold BTC or
+ETH the same way for 35 minutes (pivot low → UP, pivot high → DOWN).
+
+```bash
+npm run bot:pivotfollow -- --days 180 --json
+# flags: --lead COREUSDT --follow BTCUSDT,ETHUSDT --bar 5m --wait 30 --hold 35
+#        --pivot-strength 3 --sweep 0,15,30,45,60
+```
+
+- **Clock**: a pivot is only knowable once the `--pivot-strength` bars to its
+  right have closed (15m on the defaults), so the wait starts at that
+  confirmation, not at the pivot bar. Entry = confirmation + wait.
+- **Scoring**: PRDT-style — the follow asset's close at settle vs its close at
+  entry; flat is a loss. One position at a time.
+- **Slices**: whether CORE traded back through its pivot during the wait
+  (`held` / `broken`), whether BTC/ETH had already moved, direction, session.
+- **Controls**: the follow asset's drift over any hold window, and the same rule
+  run off the follow asset's *own* pivots. The wait-time sweep shows whether 30m
+  is special or just one point on a flat line.
+
 ## Does BTC follow CORE? (`peeperbot leadlag`)
 
 Tests one plan: when CORE makes a directional 30-minute move, does BTC go the
