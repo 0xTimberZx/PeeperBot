@@ -726,9 +726,17 @@ async function cmdPivotFollow(flags: Map<string, string>): Promise<void> {
   const only = (flags.get("dir") ?? "").toUpperCase();
   if (only === "UP" || only === "DOWN") params.only = only;
   else if (only !== "") throw new Error(`--dir must be "up" or "down", got "${flags.get("dir")}"`);
+  // --session london|ny|asia = take entries only in that session.
+  const sess = (flags.get("session") ?? "").toLowerCase();
+  if (sess === "london") params.session = "London";
+  else if (sess === "ny") params.session = "NY";
+  else if (sess === "asia") params.session = "Asia";
+  else if (sess !== "") throw new Error(`--session must be london, ny or asia, got "${flags.get("session")}"`);
+  // --skip-days N = end the window N days ago, to test a period not yet looked at.
+  const skipDays = Number(flags.get("skip-days") ?? 0);
   const breakeven = 1 / cfg.payout;
 
-  const end = Date.now();
+  const end = Date.now() - skipDays * 86_400_000;
   console.error(`[pivotfollow] fetching ${count} × ${interval} bars each for ${[lead, ...follows].join(", ")}…`);
   const [leadCandles, ...followCandles] = await Promise.all(
     [lead, ...follows].map((symbol) => fetchHistory({ symbol, interval, count, endTime: end }))
@@ -742,7 +750,11 @@ async function cmdPivotFollow(flags: Map<string, string>): Promise<void> {
   const results = follows.map((follow, k) => {
     const candles = followCandles[k]!;
     const report = analyzePivotFollow(leadCandles!, candles, params);
-    console.log("\n" + formatPivotFollow(report, { lead, follow, barMin, breakeven }));
+    const first = candles[0]?.openTime;
+    const last = candles[candles.length - 1]?.closeTime;
+    const day = (t: number): string => new Date(t).toISOString().slice(0, 10);
+    const period = first === undefined || last === undefined ? undefined : `period ${day(first)} → ${day(last)} (UTC)`;
+    console.log("\n" + formatPivotFollow(report, { lead, follow, barMin, breakeven, ...(period === undefined ? {} : { period }) }));
     const sweep = waits.map((waitMin) => {
       const r = analyzePivotFollow(leadCandles!, candles, { ...params, delayBars: bars(waitMin) });
       return { waitMin, all: r.all, held: r.byFate.held, ownPivots: r.ownPivots };
@@ -758,7 +770,7 @@ async function cmdPivotFollow(flags: Map<string, string>): Promise<void> {
 
   if (flags.get("json") === "true") {
     console.log("----- COPY BELOW (JSON) -----");
-    console.log(JSON.stringify({ lead, barMin, days, breakeven, generated: new Date(end).toISOString(), results }));
+    console.log(JSON.stringify({ lead, barMin, days, skipDays, breakeven, generated: new Date(end).toISOString(), results }));
     console.log("----- COPY ABOVE -----\n");
   }
 }
@@ -1163,6 +1175,7 @@ async function main(): Promise<void> {
           `  peeperbot leadlag   [--lead COREUSDT] [--follow BTCUSDT] [--days 60] [--window 30] [--min-move 1]\n` +
           `                     # backtest: lead asset moves → does BTC follow one window later? (+BTC pivot filter)\n` +
           `  peeperbot pivotfollow [--lead COREUSDT] [--follow BTCUSDT,ETHUSDT] [--days 60] [--wait 30] [--hold 35] [--dir up|down]\n` +
+          `                     #   [--session london|ny|asia] [--skip-days 180]\n` +
           `                     # backtest: lead asset prints a pivot → wait → hold BTC/ETH the same way\n` +
           `  peeperbot followreport [--all] [--journal path.jsonl]\n` +
           `                     # did copying him clear your venue's breakeven? win rate vs the fee-adjusted\n` +

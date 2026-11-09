@@ -69,6 +69,14 @@ describe("pivotFollow", () => {
     expect(events.map((e) => e.dir)).toEqual(["DOWN"]);
   });
 
+  it("takes entries only in the requested session", () => {
+    // Entry lands on bar 5 = 00:25 UTC, which is Asia.
+    const lead = [5, 4, 3, 4, 5, 6, 7, 8, 9, 10];
+    const follow = Array.from({ length: 10 }, (_, i) => 100 + i);
+    expect(findPivotEvents(candles(lead), candles(follow), { ...P, session: "Asia" }).events).toHaveLength(1);
+    expect(findPivotEvents(candles(lead), candles(follow), { ...P, session: "London" }).events).toHaveLength(0);
+  });
+
   it("drops a pivot whose settle bar has not printed yet", () => {
     const lead = [5, 4, 3, 4, 5, 6, 7, 8]; // settle would be bar 8 — one past the end
     const { events } = findPivotEvents(candles(lead), candles(lead), P);

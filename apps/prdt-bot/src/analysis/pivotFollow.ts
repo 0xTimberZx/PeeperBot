@@ -26,6 +26,8 @@ export interface PivotFollowParams {
   holdBars: number;
   /** Trade only pivot lows ("UP") or only pivot highs ("DOWN"); omit for both. */
   only?: Dir;
+  /** Take entries only in this session (by entry time); omit for all. */
+  session?: Session;
 }
 
 export const DEFAULT_PIVOTFOLLOW_PARAMS: PivotFollowParams = {
@@ -92,6 +94,7 @@ export function findPivotEvents(
     const exit = entry + holdBars;
     if (exit >= n) break;
     if (entry < busyUntil) continue;
+    if (params.session !== undefined && sessionOf(follow[entry]!.closeTime) !== params.session) continue;
     const dir: Dir = m === -1 ? "UP" : "DOWN";
     const sign = dir === "UP" ? 1 : -1;
     const pivotBar = lead[p]!;
@@ -183,7 +186,7 @@ function row(label: string, b: Bucket, breakeven: number): string {
 
 export function formatPivotFollow(
   report: PivotFollowReport,
-  opts: { lead: string; follow: string; barMin: number; breakeven: number }
+  opts: { lead: string; follow: string; barMin: number; breakeven: number; period?: string }
 ): string {
   const { params: p } = report;
   const be = opts.breakeven;
@@ -193,7 +196,8 @@ export function formatPivotFollow(
   const r = (label: string, b: Bucket): string => row(label, b, be);
   return [
     `═══════ Pivot-follow · ${opts.lead} → ${opts.follow} ═══════`,
-    `${opts.lead} ${p.only === "UP" ? "pivot LOW only (→ UP)" : p.only === "DOWN" ? "pivot HIGH only (→ DOWN)" : "pivot (low → UP, high → DOWN)"} → wait ${wait}m → hold ${opts.follow} ${hold}m the same way`,
+    `${opts.lead} ${p.only === "UP" ? "pivot LOW only (→ UP)" : p.only === "DOWN" ? "pivot HIGH only (→ DOWN)" : "pivot (low → UP, high → DOWN)"} → wait ${wait}m → hold ${opts.follow} ${hold}m the same way${p.session === undefined ? "" : ` · ${p.session} entries only`}`,
+    ...(opts.period === undefined ? [] : [opts.period]),
     `${report.bars} aligned ${opts.barMin}m bars · ${report.pivots} ${opts.lead} pivots (strength ${p.pivotStrength}, known ${confirm}m after the bar) · breakeven ${pct(be)}`,
     "",
     "The plan",

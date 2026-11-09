@@ -491,6 +491,8 @@ npm run bot:pivotfollow -- --days 180 --json
 # flags: --lead COREUSDT --follow BTCUSDT,ETHUSDT --bar 5m --wait 30 --hold 35
 #        --pivot-strength 3 --sweep 0,15,30,45,60
 #        --dir down   (pivot highs only; --dir up = pivot lows only)
+#        --session london|ny|asia   (entries in that session only)
+#        --skip-days 180   (end the window 180 days ago — an out-of-sample period)
 ```
 
 - **Clock**: a pivot is only knowable once the `--pivot-strength` bars to its
