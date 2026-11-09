@@ -490,6 +490,7 @@ ETH the same way for 35 minutes (pivot low → UP, pivot high → DOWN).
 npm run bot:pivotfollow -- --days 180 --json
 # flags: --lead COREUSDT --follow BTCUSDT,ETHUSDT --bar 5m --wait 30 --hold 35
 #        --pivot-strength 3 --sweep 0,15,30,45,60
+#        --dir down   (pivot highs only; --dir up = pivot lows only)
 ```
 
 - **Clock**: a pivot is only knowable once the `--pivot-strength` bars to its

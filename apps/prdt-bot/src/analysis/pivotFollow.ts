@@ -24,6 +24,8 @@ export interface PivotFollowParams {
   delayBars: number;
   /** Bars the position is held (7 × 5m = 35m). */
   holdBars: number;
+  /** Trade only pivot lows ("UP") or only pivot highs ("DOWN"); omit for both. */
+  only?: Dir;
 }
 
 export const DEFAULT_PIVOTFOLLOW_PARAMS: PivotFollowParams = {
@@ -84,6 +86,7 @@ export function findPivotEvents(
   for (let p = s; p + s < n; p++) {
     const m = marks[p];
     if (m === 0 || m === undefined) continue;
+    if (params.only !== undefined && (m === -1 ? "UP" : "DOWN") !== params.only) continue;
     pivots++;
     const entry = p + s + delayBars;
     const exit = entry + holdBars;
@@ -190,7 +193,7 @@ export function formatPivotFollow(
   const r = (label: string, b: Bucket): string => row(label, b, be);
   return [
     `═══════ Pivot-follow · ${opts.lead} → ${opts.follow} ═══════`,
-    `${opts.lead} pivot (low → UP, high → DOWN) → wait ${wait}m → hold ${opts.follow} ${hold}m the same way`,
+    `${opts.lead} ${p.only === "UP" ? "pivot LOW only (→ UP)" : p.only === "DOWN" ? "pivot HIGH only (→ DOWN)" : "pivot (low → UP, high → DOWN)"} → wait ${wait}m → hold ${opts.follow} ${hold}m the same way`,
     `${report.bars} aligned ${opts.barMin}m bars · ${report.pivots} ${opts.lead} pivots (strength ${p.pivotStrength}, known ${confirm}m after the bar) · breakeven ${pct(be)}`,
     "",
     "The plan",

@@ -722,6 +722,10 @@ async function cmdPivotFollow(flags: Map<string, string>): Promise<void> {
     delayBars: bars(Number(flags.get("wait") ?? 30)),
     holdBars: Math.max(1, bars(Number(flags.get("hold") ?? 35))),
   };
+  // --dir down = pivot highs only, --dir up = pivot lows only.
+  const only = (flags.get("dir") ?? "").toUpperCase();
+  if (only === "UP" || only === "DOWN") params.only = only;
+  else if (only !== "") throw new Error(`--dir must be "up" or "down", got "${flags.get("dir")}"`);
   const breakeven = 1 / cfg.payout;
 
   const end = Date.now();
@@ -1158,7 +1162,7 @@ async function main(): Promise<void> {
           `                     # --once for a cron tick · --test to ping your phone · --fixture f.json to replay\n` +
           `  peeperbot leadlag   [--lead COREUSDT] [--follow BTCUSDT] [--days 60] [--window 30] [--min-move 1]\n` +
           `                     # backtest: lead asset moves → does BTC follow one window later? (+BTC pivot filter)\n` +
-          `  peeperbot pivotfollow [--lead COREUSDT] [--follow BTCUSDT,ETHUSDT] [--days 60] [--wait 30] [--hold 35]\n` +
+          `  peeperbot pivotfollow [--lead COREUSDT] [--follow BTCUSDT,ETHUSDT] [--days 60] [--wait 30] [--hold 35] [--dir up|down]\n` +
           `                     # backtest: lead asset prints a pivot → wait → hold BTC/ETH the same way\n` +
           `  peeperbot followreport [--all] [--journal path.jsonl]\n` +
           `                     # did copying him clear your venue's breakeven? win rate vs the fee-adjusted\n` +

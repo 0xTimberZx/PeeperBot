@@ -61,6 +61,14 @@ describe("pivotFollow", () => {
     expect(events.map((e) => e.dir)).toEqual(["UP"]);
   });
 
+  it("trades only the requested pivot side, so the other side no longer blocks it", () => {
+    const lead = [5, 4, 3, 4, 6, 5, 4.5, 4.4, 4.3, 4.2, 4.1, 4];
+    const follow = Array.from({ length: 12 }, (_, i) => 100 + i);
+    const { events, pivots } = findPivotEvents(candles(lead), candles(follow), { ...P, only: "DOWN" });
+    expect(pivots).toBe(1);
+    expect(events.map((e) => e.dir)).toEqual(["DOWN"]);
+  });
+
   it("drops a pivot whose settle bar has not printed yet", () => {
     const lead = [5, 4, 3, 4, 5, 6, 7, 8]; // settle would be bar 8 — one past the end
     const { events } = findPivotEvents(candles(lead), candles(lead), P);
