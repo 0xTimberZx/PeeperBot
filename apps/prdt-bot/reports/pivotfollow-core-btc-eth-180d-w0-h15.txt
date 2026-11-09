@@ -1,0 +1,90 @@
+
+> peeperbot@0.0.0 bot:pivotfollow
+> npm run pivotfollow --workspace=apps/prdt-bot -- --days 180 --wait 0 --hold 15 --sweep 0 --json
+
+
+> @peeperbot/prdt-bot@0.0.0 pivotfollow
+> tsx src/cli.ts pivotfollow --days 180 --wait 0 --hold 15 --sweep 0 --json
+
+[pivotfollow] fetching 51840 × 5m bars each for COREUSDT, BTCUSDT, ETHUSDT…
+[feed] primary unavailable; using fallback source "okx"
+[feed] primary unavailable; using fallback source "okx"
+[feed] primary unavailable; using fallback source "okx"
+
+═══════ Pivot-follow · COREUSDT → BTCUSDT ═══════
+COREUSDT pivot (low → UP, high → DOWN) → wait 0m → hold BTCUSDT 15m the same way
+51840 aligned 5m bars · 7954 COREUSDT pivots (strength 3, known 15m after the bar) · breakeven 52.6%
+
+The plan
+  all pivots                     n=6874  win  51.5%  (95% floor  50.3%)  avg   0.004%  no edge
+
+Direction
+  UP   (pivot low)               n=3427  win  50.0%  (95% floor  48.3%)  avg   0.001%  no edge
+  DOWN (pivot high)              n=3447  win  52.9%  (95% floor  51.3%)  avg   0.006%  unproven
+
+Was the COREUSDT pivot still standing at entry?
+  held                           n=6874  win  51.5%  (95% floor  50.3%)  avg   0.004%  no edge
+  broken during the wait         —
+
+Had BTCUSDT already moved that way during the wait?
+  already moved                  —
+  not yet                        n=6874  win  51.5%  (95% floor  50.3%)  avg   0.004%  no edge
+
+Session
+  Asia                           n=2581  win  51.1%  (95% floor  49.2%)  avg  -0.002%  no edge
+  London                         n=1700  win  51.8%  (95% floor  49.4%)  avg   0.008%  no edge
+  NY                             n=2593  win  51.7%  (95% floor  49.8%)  avg   0.007%  no edge
+
+Controls (no lead asset)
+  BTCUSDT closes up over any 15m        49.4%
+  BTCUSDT's own pivots, same rule n=8021  win  50.4%  (95% floor  49.3%)  avg   0.003%  no edge
+
+EDGE = even the 95% floor beats breakeven. unproven = headline beats it but the
+sample can't rule out a coin flip. Trust a slice only at n ≥ 50.
+═══════════════════════════════════
+
+BTCUSDT by wait time (win rate, breakeven 52.6%)
+  wait                 all      pivot held      own pivots
+  0m        51.5% (n=6874)  51.5% (n=6874)  50.4% (n=8021)
+
+
+═══════ Pivot-follow · COREUSDT → ETHUSDT ═══════
+COREUSDT pivot (low → UP, high → DOWN) → wait 0m → hold ETHUSDT 15m the same way
+51840 aligned 5m bars · 7954 COREUSDT pivots (strength 3, known 15m after the bar) · breakeven 52.6%
+
+The plan
+  all pivots                     n=6874  win  51.0%  (95% floor  49.8%)  avg   0.005%  no edge
+
+Direction
+  UP   (pivot low)               n=3427  win  49.8%  (95% floor  48.1%)  avg   0.002%  no edge
+  DOWN (pivot high)              n=3447  win  52.2%  (95% floor  50.5%)  avg   0.009%  no edge
+
+Was the COREUSDT pivot still standing at entry?
+  held                           n=6874  win  51.0%  (95% floor  49.8%)  avg   0.005%  no edge
+  broken during the wait         —
+
+Had ETHUSDT already moved that way during the wait?
+  already moved                  —
+  not yet                        n=6874  win  51.0%  (95% floor  49.8%)  avg   0.005%  no edge
+
+Session
+  Asia                           n=2581  win  50.7%  (95% floor  48.8%)  avg  -0.000%  no edge
+  London                         n=1700  win  51.9%  (95% floor  49.5%)  avg   0.005%  no edge
+  NY                             n=2593  win  50.6%  (95% floor  48.7%)  avg   0.012%  no edge
+
+Controls (no lead asset)
+  ETHUSDT closes up over any 15m        49.5%
+  ETHUSDT's own pivots, same rule n=8181  win  49.4%  (95% floor  48.3%)  avg   0.002%  no edge
+
+EDGE = even the 95% floor beats breakeven. unproven = headline beats it but the
+sample can't rule out a coin flip. Trust a slice only at n ≥ 50.
+═══════════════════════════════════
+
+ETHUSDT by wait time (win rate, breakeven 52.6%)
+  wait                 all      pivot held      own pivots
+  0m        51.0% (n=6874)  51.0% (n=6874)  49.4% (n=8181)
+
+----- COPY BELOW (JSON) -----
+{"lead":"COREUSDT","barMin":5,"days":180,"breakeven":0.5263157894736842,"generated":"2026-11-09T19:29:00.976Z","results":[{"follow":"BTCUSDT","report":{"params":{"pivotStrength":3,"delayBars":0,"holdBars":3},"bars":51840,"pivots":7954,"all":{"n":6874,"wins":3539,"winRate":0.5148385219668316,"wilsonLow":0.5030186329991434,"avgFollowPct":0.00003636780884722014},"byDir":{"UP":{"n":3427,"wins":1714,"winRate":0.5001459002042603,"wilsonLow":0.48341458950536426,"avgFollowPct":0.000009151134334564644},"DOWN":{"n":3447,"wins":1825,"winRate":0.529445894981143,"wilsonLow":0.5127594439350904,"avgFollowPct":0.00006342656821910015}},"byFate":{"held":{"n":6874,"wins":3539,"winRate":0.5148385219668316,"wilsonLow":0.5030186329991434,"avgFollowPct":0.00003636780884722014},"broken":{"n":0,"wins":0,"winRate":0,"wilsonLow":0,"avgFollowPct":0}},"bySession":{"Asia":{"n":2581,"wins":1319,"winRate":0.5110422316931422,"wilsonLow":0.49175486147814235,"avgFollowPct":-0.000019692454075807256},"London":{"n":1700,"wins":880,"winRate":0.5176470588235295,"wilsonLow":0.4938803479033799,"avgFollowPct":0.00007736528088907986},"NY":{"n":2593,"wins":1340,"winRate":0.5167759352101813,"wilsonLow":0.49753086402768293,"avgFollowPct":0.00006529022926109295}},"byWait":{"moved":{"n":0,"wins":0,"winRate":0,"wilsonLow":0,"avgFollowPct":0},"notYet":{"n":6874,"wins":3539,"winRate":0.5148385219668316,"wilsonLow":0.5030186329991434,"avgFollowPct":0.00003636780884722014}},"baseUpRate":0.49447305978355227,"ownPivots":{"n":8021,"wins":4041,"winRate":0.5038025183892283,"wilsonLow":0.49286125310306234,"avgFollowPct":0.00003258059914531475}},"sweep":[{"waitMin":0,"all":{"n":6874,"wins":3539,"winRate":0.5148385219668316,"wilsonLow":0.5030186329991434,"avgFollowPct":0.00003636780884722014},"held":{"n":6874,"wins":3539,"winRate":0.5148385219668316,"wilsonLow":0.5030186329991434,"avgFollowPct":0.00003636780884722014},"ownPivots":{"n":8021,"wins":4041,"winRate":0.5038025183892283,"wilsonLow":0.49286125310306234,"avgFollowPct":0.00003258059914531475}}]},{"follow":"ETHUSDT","report":{"params":{"pivotStrength":3,"delayBars":0,"holdBars":3},"bars":51840,"pivots":7954,"all":{"n":6874,"wins":3504,"winRate":0.5097468722723305,"wilsonLow":0.49792686949264814,"avgFollowPct":0.000052985040060777905},"byDir":{"UP":{"n":3427,"wins":1706,"winRate":0.4978114969360957,"wilsonLow":0.4810829595064978,"avgFollowPct":0.00001784175775140796},"DOWN":{"n":3447,"wins":1798,"winRate":0.5216129968088192,"wilsonLow":0.5049219186364016,"avgFollowPct":0.00008792441588735488}},"byFate":{"held":{"n":6874,"wins":3504,"winRate":0.5097468722723305,"wilsonLow":0.49792686949264814,"avgFollowPct":0.000052985040060777905},"broken":{"n":0,"wins":0,"winRate":0,"wilsonLow":0,"avgFollowPct":0}},"bySession":{"Asia":{"n":2581,"wins":1309,"winRate":0.5071677644323905,"wilsonLow":0.4878834360853249,"avgFollowPct":-0.000004709942884468039},"London":{"n":1700,"wins":882,"winRate":0.5188235294117647,"wilsonLow":0.49505620004550244,"avgFollowPct":0.00004574083412854016},"NY":{"n":2593,"wins":1313,"winRate":0.5063632857693791,"wilsonLow":0.4871243620331825,"avgFollowPct":0.0001151624026008797}},"byWait":{"moved":{"n":0,"wins":0,"winRate":0,"wilsonLow":0,"avgFollowPct":0},"notYet":{"n":6874,"wins":3504,"winRate":0.5097468722723305,"wilsonLow":0.49792686949264814,"avgFollowPct":0.000052985040060777905}},"baseUpRate":0.4945695159827922,"ownPivots":{"n":8181,"wins":4044,"winRate":0.4943160982764943,"wilsonLow":0.48348715924552804,"avgFollowPct":0.000022687173971040402}},"sweep":[{"waitMin":0,"all":{"n":6874,"wins":3504,"winRate":0.5097468722723305,"wilsonLow":0.49792686949264814,"avgFollowPct":0.000052985040060777905},"held":{"n":6874,"wins":3504,"winRate":0.5097468722723305,"wilsonLow":0.49792686949264814,"avgFollowPct":0.000052985040060777905},"ownPivots":{"n":8181,"wins":4044,"winRate":0.4943160982764943,"wilsonLow":0.48348715924552804,"avgFollowPct":0.000022687173971040402}}]}]}
+----- COPY ABOVE -----
+
