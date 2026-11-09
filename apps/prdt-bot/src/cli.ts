@@ -10,7 +10,7 @@
 
 import { loadConfig, type BotConfig } from "./config.js";
 import { createStrategy, listStrategies } from "./strategy/registry.js";
-import { fetchHistory, fetchKlines, parseFixture, type Candle, type Interval } from "./feed/binance.js";
+import { fetchHistory, fetchKlines, intervalMs, parseFixture, type Candle, type Interval } from "./feed/binance.js";
 import { runBacktest, alignedSignalProvider, type ExternalContextProvider } from "./engine/backtest.js";
 import { formatBacktest } from "./analysis/backtestFormat.js";
 import { detectAndProfile, formatProfile } from "./analysis/spikeProfile.js";
@@ -35,6 +35,7 @@ import {
   topVolumeNodes,
   type Side,
 } from "./analysis/entryAutopsy.js";
+import { analyzeLeadLag, formatLeadLag, DEFAULT_LEADLAG_PARAMS, type LeadLagParams } from "./analysis/leadLag.js";
 import { RegimeMonitor, regimeConfigFromEnv } from "./regime/run.js";
 import { TraderFollowWatcher, followConfigFromEnv, sourceFromEnv, makePriceAt, venueWarnings } from "./social/run.js";
 import { FileTweetSource } from "./social/fileTweetSource.js";
@@ -702,6 +703,63 @@ async function cmdVprofile(flags: Map<string, string>): Promise<void> {
   console.log("----- COPY ABOVE -----\n");
 }
 
+/**
+ * Lead-lag backtest: does BTC settle the way a lead asset (CORE by default)
+ * just moved, one window later — and does a fresh BTC pivot improve the odds?
+ */
+async function cmdLeadLag(flags: Map<string, string>): Promise<void> {
+  const cfg = loadConfig();
+  const lead = (flags.get("lead") ?? cfg.signalSymbol ?? "COREUSDT").toUpperCase();
+  const follow = (flags.get("follow") ?? "BTCUSDT").toUpperCase();
+  const interval = (flags.get("bar") ?? "5m") as Interval;
+  const barMin = intervalMs(interval) / 60_000;
+  const days = Number(flags.get("days") ?? 60);
+  const windowMin = Number(flags.get("window") ?? 30);
+  const count = Math.ceil((days * 1440) / barMin);
+  const params: LeadLagParams = {
+    ...DEFAULT_LEADLAG_PARAMS,
+    windowBars: Math.max(1, Math.round(windowMin / barMin)),
+    minLeadPct: Number(flags.get("min-move") ?? DEFAULT_LEADLAG_PARAMS.minLeadPct * 100) / 100,
+    pivotStrength: Number(flags.get("pivot-strength") ?? DEFAULT_LEADLAG_PARAMS.pivotStrength),
+    pivotMaxAgeBars: Number(flags.get("pivot-age") ?? DEFAULT_LEADLAG_PARAMS.pivotMaxAgeBars),
+  };
+  const breakeven = 1 / cfg.payout;
+
+  const end = Date.now();
+  console.error(`[leadlag] fetching ${count} × ${interval} bars each for ${lead} and ${follow}…`);
+  const [leadCandles, followCandles] = await Promise.all([
+    fetchHistory({ symbol: lead, interval, count, endTime: end }),
+    fetchHistory({ symbol: follow, interval, count, endTime: end }),
+  ]);
+
+  const report = analyzeLeadLag(leadCandles, followCandles, params);
+  console.log("\n" + formatLeadLag(report, { lead, follow, barMin, breakeven }));
+
+  // Sensitivity: the same test across lead-move sizes. An edge that only shows
+  // at one hand-picked threshold is a fitted number, not an edge.
+  const sweep = (flags.get("sweep") ?? "0.5,0.75,1,1.5,2,3").split(",").map(Number).filter((x) => x > 0);
+  const sweepRows = sweep.map((movePct) => {
+    const r = analyzeLeadLag(leadCandles, followCandles, { ...params, minLeadPct: movePct / 100 });
+    return { movePct, all: r.all, aligned: r.byPivot.aligned, alignedLed: r.alignedLed };
+  });
+  const cell = (b: { n: number; winRate: number }): string =>
+    b.n === 0 ? "—".padStart(14) : `${(b.winRate * 100).toFixed(1)}% (n=${b.n})`.padStart(14);
+  console.log(
+    `\nBy lead-move size (win rate, breakeven ${(breakeven * 100).toFixed(1)}%)\n` +
+      `  ${"move ≥".padEnd(8)}${"all".padStart(14)}${"+pivot".padStart(14)}${"+pivot, led".padStart(14)}\n` +
+      sweepRows
+        .map((s) => `  ${`${s.movePct}%`.padEnd(8)}${cell(s.all)}${cell(s.aligned)}${cell(s.alignedLed)}`)
+        .join("\n") +
+      "\n"
+  );
+
+  if (flags.get("json") === "true") {
+    console.log("----- COPY BELOW (JSON) -----");
+    console.log(JSON.stringify({ lead, follow, barMin, days, breakeven, generated: new Date(end).toISOString(), report, sweep: sweepRows }));
+    console.log("----- COPY ABOVE -----\n");
+  }
+}
+
 function tradesPath(flags: Map<string, string>): string {
   return flags.get("journal") ?? process.env.PRDT_TRADES_PATH ?? "./data/prdt-trades.jsonl";
 }
@@ -992,6 +1050,9 @@ async function main(): Promise<void> {
     case "vprofile":
       await cmdVprofile(flags);
       break;
+    case "leadlag":
+      await cmdLeadLag(flags);
+      break;
     case "log":
       await cmdLog(flags);
       break;
@@ -1036,6 +1097,8 @@ async function main(): Promise<void> {
           `                     # watch a trader's X posts; page you when he opens a position, with the\n` +
           `                     # levels he named placed against price + the high-volume shelves.\n` +
           `                     # --once for a cron tick · --test to ping your phone · --fixture f.json to replay\n` +
+          `  peeperbot leadlag   [--lead COREUSDT] [--follow BTCUSDT] [--days 60] [--window 30] [--min-move 1]\n` +
+          `                     # backtest: lead asset moves → does BTC follow one window later? (+BTC pivot filter)\n` +
           `  peeperbot followreport [--all] [--journal path.jsonl]\n` +
           `                     # did copying him clear your venue's breakeven? win rate vs the fee-adjusted\n` +
           `                     # bar, sliced by asset / timeliness / parse confidence. --all includes calls\n` +

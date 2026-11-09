@@ -481,6 +481,38 @@ An *empty* collection is the one exception: that's a quiet timeline and
 normalizes to no posts, which is the steady state once `XAPI_SINCE_PARAM` is
 working. `XSOURCE=file` replays a fixture with no key at all.
 
+## Does BTC follow CORE? (`peeperbot leadlag`)
+
+Tests one plan: when CORE makes a directional 30-minute move, does BTC go the
+same way over the *next* 30 minutes — and does a fresh BTC pivot make it better?
+
+```bash
+npm run bot:leadlag -- --days 60 --json
+# flags: --lead COREUSDT --follow BTCUSDT --bar 5m --window 30 --min-move 1
+#        --pivot-strength 3 --pivot-age 6 --sweep 0.5,0.75,1,1.5,2,3
+```
+
+How it scores, so the number means what it says:
+
+- **Signal**: CORE closes ≥ `--min-move` % away from its close one window ago.
+  The call is "BTC same direction", settled PRDT-style on BTC's close one window
+  later — a flat settle is a loss.
+- **Pivot**: a BTC swing low (for UP) or high (for DOWN) is `aligned`; the
+  opposite is `opposing`. A pivot only counts once the bars to its right have
+  printed, so nothing here uses information you would not have had live.
+- **Led vs concurrent**: `led` means BTC had not yet moved with CORE in the
+  signal window. `concurrent` means it already had — that is plain BTC momentum,
+  not CORE leading.
+- **One round at a time**: after a signal the next window is skipped, so a single
+  long CORE run is not counted as six wins.
+- **Verdict**: the 95% Wilson lower bound against breakeven (52.6% at 1.9×). A
+  bucket is an `EDGE` only if that floor clears breakeven; a high win rate on 20
+  events is `unproven`.
+- **Controls**: BTC's base up-rate and "BTC's own 30m move continues" are printed
+  alongside. If CORE's number does not beat the BTC-only control, CORE adds
+  nothing. The `--sweep` table shows whether a result survives other thresholds
+  or exists only at one hand-picked cut.
+
 ## Always-on phone alerts (scheduled GitHub Actions)
 
 Both radars run **24/7 with no Codespace open** via two scheduled workflows in
