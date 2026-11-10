@@ -7,9 +7,17 @@ name: Fade watch
 # Why this is a long-running job and not a 5-minute cron like the other
 # watchers: the edge is in entering at the 5m close. GitHub's scheduler runs
 # 5–15 minutes late, and one bar late is already breakeven. So each job runs the
-# watch loop for ~3h20m (waking ~3s after every 5m close) and a new job is
-# scheduled every 3h. The concurrency group makes the next job queue until the
+# watch loop for ~3h20m (waking ~3s after every 5m close) and then starts its
+# own successor. The concurrency group makes that next job queue until the
 # running one exits, so coverage is back-to-back with a gap of about a minute.
+#
+# The chain does not rely on GitHub's scheduler, which stopped firing in this
+# repo. The cron below is only a backstop that restarts the chain if it ever
+# breaks; when the chain is healthy the extra scheduled run just replaces the
+# queued successor. To start it: Actions → Fade watch → Run workflow. To stop
+# it: cancel the running job (a cancelled job starts no successor) or disable
+# the workflow. After a failure it retries, but gives up after 3 in a row so a
+# broken build cannot loop forever.
 #
 # State: the open-call latch and the alert journal live in apps/prdt-bot/data
 # and are carried between jobs by actions/cache. The journal is also uploaded as
@@ -29,6 +37,11 @@ on:
     inputs:
       test: { description: "Send a sample alert and exit", required: false }
       report: { description: "Print the live record and exit", required: false }
+      failures: { description: "Internal: consecutive failed jobs so far", required: false, default: "0" }
+
+permissions:
+  contents: read
+  actions: write # lets the job start its own successor
 
 concurrency:
   group: fade-watch
@@ -56,6 +69,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
       - name: Watch
+        id: watch
         env:
           FEED_SOURCE: okx
           FEED_FALLBACKS: bybit
@@ -95,3 +109,23 @@ jobs:
           name: fade-journal
           path: apps/prdt-bot/data/fade-journal.jsonl
           if-no-files-found: ignore
+      # Last step on purpose: the successor queues behind this job and starts
+      # seconds after it exits. Skipped for test/report runs and when cancelled.
+      - name: Start the next watch job
+        if: ${{ !cancelled() && github.event.inputs.test != 'true' && github.event.inputs.report != 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WATCH_OUTCOME: ${{ steps.watch.outcome }}
+          FAILURES: ${{ github.event.inputs.failures || '0' }}
+        run: |
+          if [ "$WATCH_OUTCOME" = "success" ]; then
+            next=0
+          else
+            next=$((FAILURES + 1))
+            if [ "$next" -ge 3 ]; then
+              echo "::error::Fade watch failed $next times in a row - not restarting. Fix it, then Run workflow."
+              exit 1
+            fi
+            sleep 120
+          fi
+          gh workflow run fade-watch.yml --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME" -f failures="$next"

@@ -528,8 +528,10 @@ npm run bot:fadewatch -- --report   # score every past alert against price
   Judge it at 50+ settled calls, not before (~2 calls/day per token).
 - **Unattended**: `.github/workflows/fade-watch.yml` runs the loop on GitHub
   Actions in back-to-back ~3h20m jobs (a cron tick every 5 minutes would arrive
-  too late to be this trade). It uses the same `TELEGRAM_BOT_TOKEN` /
-  `TELEGRAM_CHAT_ID` secrets as the other watchers.
+  too late to be this trade). Each job starts its own successor, so it does not
+  depend on GitHub's scheduler. Start it once with Actions → Fade watch → Run
+  workflow; stop it by cancelling the running job. It uses the same
+  `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` secrets as the other watchers.
 
 ## Trade BTC/ETH off a CORE pivot (`peeperbot pivotfollow`)
 
