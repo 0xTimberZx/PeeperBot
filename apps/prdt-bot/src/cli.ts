@@ -36,6 +36,7 @@ import {
   type Side,
 } from "./analysis/entryAutopsy.js";
 import { analyzeLeadLag, formatLeadLag, DEFAULT_LEADLAG_PARAMS, type LeadLagParams } from "./analysis/leadLag.js";
+import { analyzeFade, formatFade, DEFAULT_FADE_PARAMS, type FadeParams, type FadeSide } from "./analysis/fade.js";
 import { analyzePivotFollow, formatPivotFollow, DEFAULT_PIVOTFOLLOW_PARAMS, type PivotFollowParams } from "./analysis/pivotFollow.js";
 import { RegimeMonitor, regimeConfigFromEnv } from "./regime/run.js";
 import { TraderFollowWatcher, followConfigFromEnv, sourceFromEnv, makePriceAt, venueWarnings } from "./social/run.js";
@@ -705,6 +706,67 @@ async function cmdVprofile(flags: Map<string, string>): Promise<void> {
 }
 
 /**
+ * Fade backtest: the lead asset (CORE) and a major just moved together over
+ * `--window` minutes → bet the major reverts over the next `--hold` minutes.
+ */
+async function cmdFade(flags: Map<string, string>): Promise<void> {
+  const cfg = loadConfig();
+  const lead = (flags.get("lead") ?? cfg.signalSymbol ?? "COREUSDT").toUpperCase();
+  const targets = (flags.get("target") ?? "BTCUSDT,ETHUSDT").toUpperCase().split(",").filter((x) => x.length > 0);
+  const interval = (flags.get("bar") ?? "5m") as Interval;
+  const barMin = intervalMs(interval) / 60_000;
+  const days = Number(flags.get("days") ?? 180);
+  const skipDays = Number(flags.get("skip-days") ?? 0);
+  const count = Math.ceil((days * 1440) / barMin);
+  const bars = (min: number): number => Math.max(1, Math.round(min / barMin));
+  const side = (flags.get("side") ?? DEFAULT_FADE_PARAMS.side).toLowerCase();
+  if (side !== "dump" && side !== "pump" && side !== "both") throw new Error(`--side must be dump, pump or both, got "${side}"`);
+  const params: FadeParams = {
+    windowBars: bars(Number(flags.get("window") ?? 30)),
+    holdBars: bars(Number(flags.get("hold") ?? 30)),
+    leadMovePct: Number(flags.get("lead-move") ?? DEFAULT_FADE_PARAMS.leadMovePct * 100) / 100,
+    ownMovePct: Number(flags.get("own-move") ?? DEFAULT_FADE_PARAMS.ownMovePct * 100) / 100,
+    side: side as FadeSide,
+  };
+  const breakeven = 1 / cfg.payout;
+
+  const end = Date.now() - skipDays * 86_400_000;
+  console.error(`[fade] fetching ${count} × ${interval} bars each for ${[lead, ...targets].join(", ")}…`);
+  // Sequential: three 500-day pulls in parallel trip the exchange rate limit.
+  const series: Awaited<ReturnType<typeof fetchHistory>>[] = [];
+  for (const symbol of [lead, ...targets]) series.push(await fetchHistory({ symbol, interval, count, endTime: end }));
+  const [leadCandles, ...targetCandles] = series;
+
+  // Sensitivity: an edge that only shows at one hand-picked threshold or hold
+  // is a fitted number, not an edge.
+  const leadMoves = (flags.get("sweep") ?? "1,1.25,1.5,2,2.5").split(",").map(Number).filter((x) => x > 0);
+  const holds = (flags.get("hold-sweep") ?? "15,30,35,45,60").split(",").map(Number).filter((x) => x > 0);
+  const cell = (b: { n: number; winRate: number; wilsonLow: number }): string =>
+    b.n === 0 ? "—".padStart(28) : `${(b.winRate * 100).toFixed(1)}% (n=${b.n}, floor ${(b.wilsonLow * 100).toFixed(1)}%)`.padStart(28);
+  const results = targets.map((target, k) => {
+    const candles = targetCandles[k]!;
+    const report = analyzeFade(leadCandles!, candles, params);
+    console.log("\n" + formatFade(report, { lead, target, barMin, breakeven }));
+    const byLeadMove = leadMoves.map((movePct) => ({ movePct, all: analyzeFade(leadCandles!, candles, { ...params, leadMovePct: movePct / 100 }).all }));
+    const byHold = holds.map((holdMin) => ({ holdMin, all: analyzeFade(leadCandles!, candles, { ...params, holdBars: bars(holdMin) }).all }));
+    console.log(
+      `\n${target} by ${lead} move size (breakeven ${(breakeven * 100).toFixed(1)}%)\n` +
+        byLeadMove.map((s) => `  ${`≥ ${s.movePct}%`.padEnd(10)}${cell(s.all)}`).join("\n") +
+        `\n\n${target} by hold time\n` +
+        byHold.map((s) => `  ${`${s.holdMin}m`.padEnd(10)}${cell(s.all)}`).join("\n") +
+        "\n"
+    );
+    return { target, report, byLeadMove, byHold };
+  });
+
+  if (flags.get("json") === "true") {
+    console.log("----- COPY BELOW (JSON) -----");
+    console.log(JSON.stringify({ lead, barMin, days, skipDays, breakeven, generated: new Date(end).toISOString(), results }));
+    console.log("----- COPY ABOVE -----\n");
+  }
+}
+
+/**
  * Pivot-follow backtest: the lead asset (CORE by default) prints a swing pivot,
  * wait `--wait` minutes, then hold BTC / ETH the same way for `--hold` minutes.
  */
@@ -1125,6 +1187,9 @@ async function main(): Promise<void> {
     case "leadlag":
       await cmdLeadLag(flags);
       break;
+    case "fade":
+      await cmdFade(flags);
+      break;
     case "pivotfollow":
       await cmdPivotFollow(flags);
       break;
@@ -1174,6 +1239,9 @@ async function main(): Promise<void> {
           `                     # --once for a cron tick · --test to ping your phone · --fixture f.json to replay\n` +
           `  peeperbot leadlag   [--lead COREUSDT] [--follow BTCUSDT] [--days 60] [--window 30] [--min-move 1]\n` +
           `                     # backtest: lead asset moves → does BTC follow one window later? (+BTC pivot filter)\n` +
+          `  peeperbot fade      [--lead COREUSDT] [--target BTCUSDT,ETHUSDT] [--days 180] [--side dump|pump|both]\n` +
+          `                     #   [--window 30] [--hold 30] [--lead-move 1.5] [--own-move 0.15] [--skip-days 0]\n` +
+          `                     # backtest: lead + major dumped together → bet the major bounces\n` +
           `  peeperbot pivotfollow [--lead COREUSDT] [--follow BTCUSDT,ETHUSDT] [--days 60] [--wait 30] [--hold 35] [--dir up|down]\n` +
           `                     #   [--session london|ny|asia] [--skip-days 180]\n` +
           `                     # backtest: lead asset prints a pivot → wait → hold BTC/ETH the same way\n` +

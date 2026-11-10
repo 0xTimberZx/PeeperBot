@@ -481,6 +481,29 @@ An *empty* collection is the one exception: that's a quiet timeline and
 normalizes to no posts, which is the steady state once `XAPI_SINCE_PARAM` is
 working. `XSOURCE=file` replays a fixture with no key at all.
 
+## Fade the joint dump (`peeperbot fade`)
+
+The one CORE confluence that held up on data it was not picked from: CORE and a
+major dump together over 30 minutes → bet the major **bounces** over the next 30.
+It is the mirror of `leadlag` — majors do not follow CORE's move, they revert.
+
+```bash
+npm run bot:fade -- --days 540 --json
+# flags: --lead COREUSDT --target BTCUSDT,ETHUSDT --bar 5m --window 30 --hold 30
+#        --lead-move 1.5 --own-move 0.15 --side dump|pump|both --skip-days 0
+#        --sweep 1,1.25,1.5,2,2.5 --hold-sweep 15,30,35,45,60
+```
+
+- **Signal** (both must hold at a 5m close): CORE is down ≥ `--lead-move` % and
+  the target is down ≥ `--own-move` % versus 30 minutes ago. Bet UP on the
+  target, settled PRDT-style one hold later; flat is a loss. One position at a time.
+- **Thirds**: the sample is cut into three equal time slices. Only trust a setup
+  that clears breakeven in all three.
+- **Controls**: the target's own dump *without* CORE confirming (the lift CORE
+  adds), and the target's drift over any hold window.
+- `--side pump` fades joint rises (bet DOWN). That side is weaker and only shows
+  on BTC/ETH; `dump` is the default for a reason.
+
 ## Trade BTC/ETH off a CORE pivot (`peeperbot pivotfollow`)
 
 Tests one plan: CORE prints a swing pivot, you wait 30 minutes, then hold BTC or
