@@ -481,6 +481,113 @@ An *empty* collection is the one exception: that's a quiet timeline and
 normalizes to no posts, which is the steady state once `XAPI_SINCE_PARAM` is
 working. `XSOURCE=file` replays a fixture with no key at all.
 
+## Fade the joint dump (`peeperbot fade`)
+
+The one CORE confluence that held up on data it was not picked from: CORE and a
+major dump together over 30 minutes → bet the major **bounces** over the next 30.
+It is the mirror of `leadlag` — majors do not follow CORE's move, they revert.
+
+```bash
+npm run bot:fade -- --days 540 --json
+# flags: --lead COREUSDT --target BTCUSDT,ETHUSDT --bar 5m --window 30 --hold 30
+#        --lead-move 1.5 --own-move 0.15 --side dump|pump|both --skip-days 0
+#        --sweep 1,1.25,1.5,2,2.5 --hold-sweep 15,30,35,45,60
+```
+
+- **Signal** (both must hold at a 5m close): CORE is down ≥ `--lead-move` % and
+  the target is down ≥ `--own-move` % versus 30 minutes ago. Bet UP on the
+  target, settled PRDT-style one hold later; flat is a loss. One position at a time.
+- **Thirds**: the sample is cut into three equal time slices. Only trust a setup
+  that clears breakeven in all three.
+- **Controls**: the target's own dump *without* CORE confirming (the lift CORE
+  adds), and the target's drift over any hold window.
+- `--side pump` fades joint rises (bet DOWN). That side is weaker and only shows
+  on BTC/ETH; `dump` is the default for a reason.
+
+### Live alerts (`peeperbot fadewatch`)
+
+Pings Telegram the moment the setup above is live on BTC or ETH. It never trades.
+
+```bash
+npm run bot:fadewatch -- --test     # canned ping: proves Telegram delivery
+npm run bot:fadewatch               # watch: wakes ~3s after every 5m close
+npm run bot:fadewatch -- --report   # score every past alert against price
+# flags: --target BTCUSDT,ETHUSDT --for 200 (minutes, then exit) --max-late 120 --once
+# env:   FADE_TARGETS FADE_LEAD_MOVE_PCT FADE_OWN_MOVE_PCT FADE_HOLD_MIN FADE_MAX_LATE_SEC
+```
+
+- **Be fast.** The backtest enters at the 5m close. Entering one bar (5 minutes)
+  late drops BTC from 56.5% to 54.2% and ETH from 57.4% to 52.7% — breakeven. Each
+  alert says how many seconds old it is, and a setup found more than
+  `--max-late` seconds after its close is skipped, not sent.
+- **One call at a time** per token: no second alert until the first has settled,
+  exactly as the backtest counts trades.
+- **Journal**: every alert is appended to `data/fade-journal.jsonl` (intent only —
+  direction, prices, settle time). `--report` recomputes win/loss from price,
+  scored from the price *at the alert*, so it measures what you could really get.
+  Judge it at 50+ settled calls, not before (~2 calls/day per token).
+- **Unattended**: `.github/workflows/fade-watch.yml` runs the loop on GitHub
+  Actions in back-to-back ~3h20m jobs (a cron tick every 5 minutes would arrive
+  too late to be this trade). It uses the same `TELEGRAM_BOT_TOKEN` /
+  `TELEGRAM_CHAT_ID` secrets as the other watchers.
+
+## Trade BTC/ETH off a CORE pivot (`peeperbot pivotfollow`)
+
+Tests one plan: CORE prints a swing pivot, you wait 30 minutes, then hold BTC or
+ETH the same way for 35 minutes (pivot low → UP, pivot high → DOWN).
+
+```bash
+npm run bot:pivotfollow -- --days 180 --json
+# flags: --lead COREUSDT --follow BTCUSDT,ETHUSDT --bar 5m --wait 30 --hold 35
+#        --pivot-strength 3 --sweep 0,15,30,45,60
+#        --dir down   (pivot highs only; --dir up = pivot lows only)
+#        --session london|ny|asia   (entries in that session only)
+#        --skip-days 180   (end the window 180 days ago — an out-of-sample period)
+```
+
+- **Clock**: a pivot is only knowable once the `--pivot-strength` bars to its
+  right have closed (15m on the defaults), so the wait starts at that
+  confirmation, not at the pivot bar. Entry = confirmation + wait.
+- **Scoring**: PRDT-style — the follow asset's close at settle vs its close at
+  entry; flat is a loss. One position at a time.
+- **Slices**: whether CORE traded back through its pivot during the wait
+  (`held` / `broken`), whether BTC/ETH had already moved, direction, session.
+- **Controls**: the follow asset's drift over any hold window, and the same rule
+  run off the follow asset's *own* pivots. The wait-time sweep shows whether 30m
+  is special or just one point on a flat line.
+
+## Does BTC follow CORE? (`peeperbot leadlag`)
+
+Tests one plan: when CORE makes a directional 30-minute move, does BTC go the
+same way over the *next* 30 minutes — and does a fresh BTC pivot make it better?
+
+```bash
+npm run bot:leadlag -- --days 60 --json
+# flags: --lead COREUSDT --follow BTCUSDT --bar 5m --window 30 --min-move 1
+#        --pivot-strength 3 --pivot-age 6 --sweep 0.5,0.75,1,1.5,2,3
+```
+
+How it scores, so the number means what it says:
+
+- **Signal**: CORE closes ≥ `--min-move` % away from its close one window ago.
+  The call is "BTC same direction", settled PRDT-style on BTC's close one window
+  later — a flat settle is a loss.
+- **Pivot**: a BTC swing low (for UP) or high (for DOWN) is `aligned`; the
+  opposite is `opposing`. A pivot only counts once the bars to its right have
+  printed, so nothing here uses information you would not have had live.
+- **Led vs concurrent**: `led` means BTC had not yet moved with CORE in the
+  signal window. `concurrent` means it already had — that is plain BTC momentum,
+  not CORE leading.
+- **One round at a time**: after a signal the next window is skipped, so a single
+  long CORE run is not counted as six wins.
+- **Verdict**: the 95% Wilson lower bound against breakeven (52.6% at 1.9×). A
+  bucket is an `EDGE` only if that floor clears breakeven; a high win rate on 20
+  events is `unproven`.
+- **Controls**: BTC's base up-rate and "BTC's own 30m move continues" are printed
+  alongside. If CORE's number does not beat the BTC-only control, CORE adds
+  nothing. The `--sweep` table shows whether a result survives other thresholds
+  or exists only at one hand-picked cut.
+
 ## Always-on phone alerts (scheduled GitHub Actions)
 
 Both radars run **24/7 with no Codespace open** via two scheduled workflows in

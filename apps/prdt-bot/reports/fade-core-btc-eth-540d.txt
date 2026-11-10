@@ -1,0 +1,104 @@
+
+> peeperbot@0.0.0 bot:fade
+> npm run fade --workspace=apps/prdt-bot -- --days 540 --json
+
+
+> @peeperbot/prdt-bot@0.0.0 fade
+> tsx src/cli.ts fade --days 540 --json
+
+[fade] fetching 155520 × 5m bars each for COREUSDT, BTCUSDT, ETHUSDT…
+[feed] primary unavailable; using fallback source "okx"
+[feed] primary unavailable; using fallback source "okx"
+[feed] primary unavailable; using fallback source "okx"
+
+═══════ Fade · COREUSDT confirms → BTCUSDT ═══════
+COREUSDT dumped ≥ 1.50% and BTCUSDT dumped ≥ 0.15% over 30m → bet UP on BTCUSDT for 30m
+period 2025-05-19 → 2026-11-10 (UTC) · 155520 aligned 5m bars · breakeven 52.6% · 2.1 trades/day
+
+The plan
+  all setups                         n= 1109  win  56.4%  (95% floor  53.5%)  avg   0.016%  EDGE
+
+Does it hold in every third of the period?
+  oldest third (from 2025-05-19)     n=  283  win  58.3%  (95% floor  52.5%)  avg   0.030%  unproven
+  middle third (from 2025-11-15)     n=  460  win  55.4%  (95% floor  50.9%)  avg   0.002%  unproven
+  newest third (from 2026-05-14)     n=  366  win  56.3%  (95% floor  51.2%)  avg   0.023%  unproven
+
+Bet direction
+  UP   (after a joint dump)          n= 1109  win  56.4%  (95% floor  53.5%)  avg   0.016%  EDGE
+  DOWN (after a joint pump)          —
+
+Session
+  Asia                               n=  361  win  54.6%  (95% floor  49.4%)  avg   0.022%  unproven
+  London                             n=  176  win  58.5%  (95% floor  51.1%)  avg   0.045%  unproven
+  NY                                 n=  572  win  57.0%  (95% floor  52.9%)  avg   0.004%  EDGE
+
+Controls
+  BTCUSDT moved, COREUSDT did NOT confirm n= 9609  win  52.2%  (95% floor  51.2%)  avg   0.001%  no edge
+  BTCUSDT closes up over any 30m            50.1%
+
+EDGE = even the 95% floor beats breakeven. unproven = headline beats it but the
+sample can't rule out a coin flip. Trust a slice only at n ≥ 50.
+═══════════════════════════════════
+
+BTCUSDT by COREUSDT move size (breakeven 52.6%)
+  ≥ 1%       55.0% (n=2386, floor 53.0%)
+  ≥ 1.25%    55.1% (n=1603, floor 52.6%)
+  ≥ 1.5%     56.4% (n=1109, floor 53.5%)
+  ≥ 2%        55.8% (n=541, floor 51.6%)
+  ≥ 2.5%      55.2% (n=308, floor 49.6%)
+
+BTCUSDT by hold time
+  15m        54.6% (n=1475, floor 52.0%)
+  30m        56.4% (n=1109, floor 53.5%)
+  35m        57.5% (n=1078, floor 54.5%)
+  45m        55.3% (n=1025, floor 52.3%)
+  60m         54.1% (n=976, floor 51.0%)
+
+
+═══════ Fade · COREUSDT confirms → ETHUSDT ═══════
+COREUSDT dumped ≥ 1.50% and ETHUSDT dumped ≥ 0.15% over 30m → bet UP on ETHUSDT for 30m
+period 2025-05-19 → 2026-11-10 (UTC) · 155520 aligned 5m bars · breakeven 52.6% · 2.2 trades/day
+
+The plan
+  all setups                         n= 1186  win  57.3%  (95% floor  54.5%)  avg   0.011%  EDGE
+
+Does it hold in every third of the period?
+  oldest third (from 2025-05-19)     n=  298  win  58.4%  (95% floor  52.7%)  avg   0.041%  EDGE
+  middle third (from 2025-11-15)     n=  500  win  56.6%  (95% floor  52.2%)  avg  -0.004%  unproven
+  newest third (from 2026-05-14)     n=  388  win  57.5%  (95% floor  52.5%)  avg   0.006%  unproven
+
+Bet direction
+  UP   (after a joint dump)          n= 1186  win  57.3%  (95% floor  54.5%)  avg   0.011%  EDGE
+  DOWN (after a joint pump)          —
+
+Session
+  Asia                               n=  390  win  57.4%  (95% floor  52.5%)  avg   0.049%  unproven
+  London                             n=  188  win  60.1%  (95% floor  53.0%)  avg   0.067%  EDGE
+  NY                                 n=  608  win  56.4%  (95% floor  52.4%)  avg  -0.031%  unproven
+
+Controls
+  ETHUSDT moved, COREUSDT did NOT confirm n=11783  win  53.1%  (95% floor  52.2%)  avg   0.001%  unproven
+  ETHUSDT closes up over any 30m            50.3%
+
+EDGE = even the 95% floor beats breakeven. unproven = headline beats it but the
+sample can't rule out a coin flip. Trust a slice only at n ≥ 50.
+═══════════════════════════════════
+
+ETHUSDT by COREUSDT move size (breakeven 52.6%)
+  ≥ 1%       55.7% (n=2585, floor 53.8%)
+  ≥ 1.25%    56.4% (n=1719, floor 54.1%)
+  ≥ 1.5%     57.3% (n=1186, floor 54.5%)
+  ≥ 2%        56.9% (n=583, floor 52.9%)
+  ≥ 2.5%      56.8% (n=340, floor 51.5%)
+
+ETHUSDT by hold time
+  15m        54.3% (n=1587, floor 51.9%)
+  30m        57.3% (n=1186, floor 54.5%)
+  35m        56.0% (n=1151, floor 53.2%)
+  45m        55.9% (n=1101, floor 53.0%)
+  60m        55.8% (n=1043, floor 52.8%)
+
+----- COPY BELOW (JSON) -----
+{"lead":"COREUSDT","barMin":5,"days":540,"skipDays":0,"breakeven":0.5263157894736842,"generated":"2026-11-10T07:09:14.772Z","results":[{"target":"BTCUSDT","report":{"params":{"windowBars":6,"holdBars":6,"leadMovePct":0.015,"ownMovePct":0.0015,"side":"dump"},"bars":155520,"firstTime":1747638600000,"lastTime":1794294599999,"all":{"n":1109,"wins":626,"winRate":0.5644724977457168,"wilsonLow":0.5351171998013474,"avgFollowPct":0.00016285427504016811},"byBet":{"UP":{"n":1109,"wins":626,"winRate":0.5644724977457168,"wilsonLow":0.5351171998013474,"avgFollowPct":0.00016285427504016811},"DOWN":{"n":0,"wins":0,"winRate":0,"wilsonLow":0,"avgFollowPct":0}},"bySession":{"Asia":{"n":361,"wins":197,"winRate":0.5457063711911357,"wilsonLow":0.4941309772629429,"avgFollowPct":0.00022379483455970897},"London":{"n":176,"wins":103,"winRate":0.5852272727272727,"wilsonLow":0.5113761157744521,"avgFollowPct":0.00045059511605622586},"NY":{"n":572,"wins":326,"winRate":0.5699300699300699,"wilsonLow":0.529023301884292,"avgFollowPct":0.00003585789391188067}},"thirds":[{"from":1747638600000,"bucket":{"n":283,"wins":165,"winRate":0.5830388692579506,"wilsonLow":0.5248559424563447,"avgFollowPct":0.0003000542319980026}},{"from":1763190599999.6667,"bucket":{"n":460,"wins":255,"winRate":0.5543478260869565,"wilsonLow":0.5086619475889317,"avgFollowPct":0.000022764692574177957}},{"from":1778742599999.3333,"bucket":{"n":366,"wins":206,"winRate":0.5628415300546448,"wilsonLow":0.5116299684354233,"avgFollowPct":0.0002328368436611744}}],"ownOnly":{"n":9609,"wins":5012,"winRate":0.5215943386408576,"wilsonLow":0.511599631397775,"avgFollowPct":0.000006372865465368165},"baseUpRate":0.5007973558650668},"byLeadMove":[{"movePct":1,"all":{"n":2386,"wins":1312,"winRate":0.5498742665549036,"wilsonLow":0.5298472764622432,"avgFollowPct":0.00021619459354914878}},{"movePct":1.25,"all":{"n":1603,"wins":883,"winRate":0.5508421709295072,"wilsonLow":0.5263992483657784,"avgFollowPct":0.00016622790011787517}},{"movePct":1.5,"all":{"n":1109,"wins":626,"winRate":0.5644724977457168,"wilsonLow":0.5351171998013474,"avgFollowPct":0.00016285427504016811}},{"movePct":2,"all":{"n":541,"wins":302,"winRate":0.5582255083179297,"wilsonLow":0.5161139037108149,"avgFollowPct":0.00029747062103398594}},{"movePct":2.5,"all":{"n":308,"wins":170,"winRate":0.551948051948052,"wilsonLow":0.49610906029859725,"avgFollowPct":0.0003883543170537853}}],"byHold":[{"holdMin":15,"all":{"n":1475,"wins":805,"winRate":0.5457627118644067,"wilsonLow":0.520266655519457,"avgFollowPct":0.00009546684382584643}},{"holdMin":30,"all":{"n":1109,"wins":626,"winRate":0.5644724977457168,"wilsonLow":0.5351171998013474,"avgFollowPct":0.00016285427504016811}},{"holdMin":35,"all":{"n":1078,"wins":620,"winRate":0.575139146567718,"wilsonLow":0.5454144228766168,"avgFollowPct":0.00026269211983827296}},{"holdMin":45,"all":{"n":1025,"wins":567,"winRate":0.5531707317073171,"wilsonLow":0.5225919368192359,"avgFollowPct":0.0002323803381562013}},{"holdMin":60,"all":{"n":976,"wins":528,"winRate":0.5409836065573771,"wilsonLow":0.5096203780247882,"avgFollowPct":0.0000805773602027808}}]},{"target":"ETHUSDT","report":{"params":{"windowBars":6,"holdBars":6,"leadMovePct":0.015,"ownMovePct":0.0015,"side":"dump"},"bars":155520,"firstTime":1747638600000,"lastTime":1794294599999,"all":{"n":1186,"wins":680,"winRate":0.5733558178752108,"wilsonLow":0.5450147300944366,"avgFollowPct":0.00010868988410308419},"byBet":{"UP":{"n":1186,"wins":680,"winRate":0.5733558178752108,"wilsonLow":0.5450147300944366,"avgFollowPct":0.00010868988410308419},"DOWN":{"n":0,"wins":0,"winRate":0,"wilsonLow":0,"avgFollowPct":0}},"bySession":{"Asia":{"n":390,"wins":224,"winRate":0.5743589743589743,"wilsonLow":0.5247958040536658,"avgFollowPct":0.0004883963819308341},"London":{"n":188,"wins":113,"winRate":0.601063829787234,"wilsonLow":0.529716327022195,"avgFollowPct":0.0006734418413023438},"NY":{"n":608,"wins":343,"winRate":0.5641447368421053,"wilsonLow":0.5244480278529733,"avgFollowPct":-0.00030949909962435534}},"thirds":[{"from":1747638600000,"bucket":{"n":298,"wins":174,"winRate":0.5838926174496645,"wilsonLow":0.5272068475578336,"avgFollowPct":0.00040933788230467}},{"from":1763190599999.6667,"bucket":{"n":500,"wins":283,"winRate":0.566,"wilsonLow":0.5222163520086531,"avgFollowPct":-0.00003504138381043887}},{"from":1778742599999.3333,"bucket":{"n":388,"wins":223,"winRate":0.5747422680412371,"wilsonLow":0.5250527981080276,"avgFollowPct":0.00006300052970279801}}],"ownOnly":{"n":11783,"wins":6260,"winRate":0.5312738691334974,"wilsonLow":0.5222546793929872,"avgFollowPct":0.00001031003267049128},"baseUpRate":0.5034723561865813},"byLeadMove":[{"movePct":1,"all":{"n":2585,"wins":1440,"winRate":0.5570599613152805,"wilsonLow":0.5378401768833129,"avgFollowPct":0.00018085855022541015}},{"movePct":1.25,"all":{"n":1719,"wins":970,"winRate":0.564281559045957,"wilsonLow":0.5407233169522145,"avgFollowPct":0.00016422798369235348}},{"movePct":1.5,"all":{"n":1186,"wins":680,"winRate":0.5733558178752108,"wilsonLow":0.5450147300944366,"avgFollowPct":0.00010868988410308419}},{"movePct":2,"all":{"n":583,"wins":332,"winRate":0.5694682675814752,"wilsonLow":0.5289488994445785,"avgFollowPct":0.00020778732683247948}},{"movePct":2.5,"all":{"n":340,"wins":193,"winRate":0.5676470588235294,"wilsonLow":0.5145215164803356,"avgFollowPct":0.0004907530639487789}}],"byHold":[{"holdMin":15,"all":{"n":1587,"wins":862,"winRate":0.5431632010081916,"wilsonLow":0.5185800498070343,"avgFollowPct":0.00006013787296760307}},{"holdMin":30,"all":{"n":1186,"wins":680,"winRate":0.5733558178752108,"wilsonLow":0.5450147300944366,"avgFollowPct":0.00010868988410308419}},{"holdMin":35,"all":{"n":1151,"wins":645,"winRate":0.5603822762814944,"wilsonLow":0.5315537870222646,"avgFollowPct":0.00018476275428493802}},{"holdMin":45,"all":{"n":1101,"wins":616,"winRate":0.5594913714804723,"wilsonLow":0.5300099271484321,"avgFollowPct":0.00022331739830386385}},{"holdMin":60,"all":{"n":1043,"wins":582,"winRate":0.5580057526366251,"wilsonLow":0.5277076055316379,"avgFollowPct":0.00007928376121230698}}]}]}
+----- COPY ABOVE -----
+

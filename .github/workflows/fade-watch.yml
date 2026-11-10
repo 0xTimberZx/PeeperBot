@@ -1,0 +1,97 @@
+name: Fade watch
+
+# Live alert for the one CORE confluence that held up out of sample: CORE and
+# BTC/ETH dump together over 30 minutes → bet the major bounces for 30. It pings
+# Telegram and never trades. Backtest: `npm run bot:fade -- --days 540`.
+#
+# Why this is a long-running job and not a 5-minute cron like the other
+# watchers: the edge is in entering at the 5m close. GitHub's scheduler runs
+# 5–15 minutes late, and one bar late is already breakeven. So each job runs the
+# watch loop for ~3h20m (waking ~3s after every 5m close) and a new job is
+# scheduled every 3h. The concurrency group makes the next job queue until the
+# running one exits, so coverage is back-to-back with a gap of about a minute.
+#
+# State: the open-call latch and the alert journal live in apps/prdt-bot/data
+# and are carried between jobs by actions/cache. The journal is also uploaded as
+# an artifact on every run, and the live record is printed at the end of each job.
+#
+# Secrets (same as the other watchers): TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID.
+# Variables (optional): FADE_TARGETS (default BTCUSDT,ETHUSDT),
+#   FADE_LEAD_MOVE_PCT (1.5), FADE_OWN_MOVE_PCT (0.15), FADE_HOLD_MIN (30),
+#   FADE_MAX_LATE_SEC (120).
+#
+# Test the wiring: Actions → Fade watch → Run workflow → set "test" to true.
+
+on:
+  schedule:
+    - cron: "17 */3 * * *"
+  workflow_dispatch:
+    inputs:
+      test: { description: "Send a sample alert and exit", required: false }
+      report: { description: "Print the live record and exit", required: false }
+
+concurrency:
+  group: fade-watch
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 230
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Restore latch + journal
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            apps/prdt-bot/data/fadewatch-state.json
+            apps/prdt-bot/data/fade-journal.jsonl
+          key: fade-watch-${{ github.run_id }}
+          restore-keys: |
+            fade-watch-
+      - name: Install dependencies
+        run: npm ci
+      - name: Watch
+        env:
+          FEED_SOURCE: okx
+          FEED_FALLBACKS: bybit
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          FADE_TARGETS: ${{ vars.FADE_TARGETS }}
+          FADE_LEAD_MOVE_PCT: ${{ vars.FADE_LEAD_MOVE_PCT }}
+          FADE_OWN_MOVE_PCT: ${{ vars.FADE_OWN_MOVE_PCT }}
+          FADE_HOLD_MIN: ${{ vars.FADE_HOLD_MIN }}
+          FADE_MAX_LATE_SEC: ${{ vars.FADE_MAX_LATE_SEC }}
+        run: |
+          if [ "${{ github.event.inputs.test }}" = "true" ]; then
+            npm run fadewatch --workspace=apps/prdt-bot -- --test
+          elif [ "${{ github.event.inputs.report }}" = "true" ]; then
+            npm run fadewatch --workspace=apps/prdt-bot -- --report
+          else
+            npm run fadewatch --workspace=apps/prdt-bot -- --for 200
+          fi
+      - name: Live record
+        if: always() && github.event.inputs.test != 'true' && github.event.inputs.report != 'true'
+        env:
+          FEED_SOURCE: okx
+          FEED_FALLBACKS: bybit
+        run: npm run fadewatch --workspace=apps/prdt-bot -- --report
+      - name: Save latch + journal
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            apps/prdt-bot/data/fadewatch-state.json
+            apps/prdt-bot/data/fade-journal.jsonl
+          key: fade-watch-${{ github.run_id }}
+      - name: Upload journal
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fade-journal
+          path: apps/prdt-bot/data/fade-journal.jsonl
+          if-no-files-found: ignore
