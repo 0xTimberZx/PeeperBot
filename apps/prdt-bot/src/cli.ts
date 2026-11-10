@@ -37,6 +37,7 @@ import {
 } from "./analysis/entryAutopsy.js";
 import { analyzeLeadLag, formatLeadLag, DEFAULT_LEADLAG_PARAMS, type LeadLagParams } from "./analysis/leadLag.js";
 import { analyzeFade, formatFade, DEFAULT_FADE_PARAMS, type FadeParams, type FadeSide } from "./analysis/fade.js";
+import { FadeWatcher, FadeJournal, fadeWatchConfigFromEnv, scoreFadeCalls } from "./watch/fadeWatch.js";
 import { analyzePivotFollow, formatPivotFollow, DEFAULT_PIVOTFOLLOW_PARAMS, type PivotFollowParams } from "./analysis/pivotFollow.js";
 import { RegimeMonitor, regimeConfigFromEnv } from "./regime/run.js";
 import { TraderFollowWatcher, followConfigFromEnv, sourceFromEnv, makePriceAt, venueWarnings } from "./social/run.js";
@@ -767,6 +768,70 @@ async function cmdFade(flags: Map<string, string>): Promise<void> {
 }
 
 /**
+ * Live fade alerts: pings Telegram when CORE and BTC/ETH have dumped together
+ * (the `fade` backtest's setup). Never trades. `--report` scores past alerts.
+ */
+async function cmdFadeWatch(flags: Map<string, string>): Promise<void> {
+  const cfg = loadConfig();
+  const dispatcher = buildDispatcher(cfg);
+  const breakeven = 1 / cfg.payout;
+  const watchCfg = fadeWatchConfigFromEnv({ lead: (flags.get("lead") ?? cfg.signalSymbol ?? "COREUSDT").toUpperCase(), breakeven });
+  const target = flags.get("target");
+  if (target !== undefined) watchCfg.targets = target.toUpperCase().split(",").filter((x) => x.length > 0);
+  const maxLate = flags.get("max-late");
+  if (maxLate !== undefined) watchCfg.maxLateSec = Number(maxLate);
+
+  // --test: canned ping, no feed call — proves Telegram delivery.
+  if (flags.get("test") === "true") {
+    await dispatcher.dispatch({
+      symbol: watchCfg.targets[0] ?? "BTCUSDT",
+      timeframeMin: 30,
+      direction: "UP",
+      confidence: 0.56,
+      entryPrice: 0,
+      reason: "TEST — this is what a fade alert looks like. No setup is live; do not trade this.",
+      strategy: "fade-watch",
+      live: false,
+      ts: Date.now(),
+    });
+    return;
+  }
+
+  // --report: how have the live alerts actually done?
+  if (flags.get("report") === "true") {
+    const calls = new FadeJournal(watchCfg.journalPath ?? "./data/fade-journal.jsonl").readAll();
+    const score = await scoreFadeCalls(calls, Date.now(), async (symbol, ts) => {
+      // Last 1m candle that closed at or before the settle time.
+      const page = await fetchKlines({ symbol, interval: "1m", limit: 3, endTime: ts });
+      const done = page.filter((c) => c.closeTime < ts);
+      return done[done.length - 1]?.close ?? null;
+    });
+    const p = (x: number): string => `${(x * 100).toFixed(1)}%`;
+    console.log(`\n═══════ Fade alerts — live record ═══════`);
+    console.log(`${calls.length} alerts · ${score.settled} settled · ${score.pending} pending · breakeven ${p(breakeven)}`);
+    if (score.settled > 0) {
+      console.log(`win rate ${p(score.winRate)} (95% floor ${p(score.wilsonLow)}) — scored from the price at the alert, flat = loss`);
+      for (const [sym, s] of Object.entries(score.bySymbol)) console.log(`  ${sym.padEnd(10)} n=${s.n}  win ${p(s.wins / s.n)}`);
+      const late = calls.reduce((a, c) => a + c.lateSec, 0) / calls.length;
+      console.log(`average alert delay ${late.toFixed(0)}s after the 5m close`);
+      if (score.settled < 50) console.log(`Fewer than 50 settled calls: too few to compare with the backtest yet.`);
+    }
+    console.log("═══════════════════════════════════\n");
+    return;
+  }
+
+  const watcher = new FadeWatcher(watchCfg, dispatcher);
+  if (flags.get("once") === "true") {
+    await watcher.runOnce();
+    return;
+  }
+  process.on("SIGINT", () => watcher.stop());
+  process.on("SIGTERM", () => watcher.stop());
+  const forMin = flags.get("for");
+  await watcher.start(forMin === undefined ? undefined : Number(forMin));
+}
+
+/**
  * Pivot-follow backtest: the lead asset (CORE by default) prints a swing pivot,
  * wait `--wait` minutes, then hold BTC / ETH the same way for `--hold` minutes.
  */
@@ -1190,6 +1255,9 @@ async function main(): Promise<void> {
     case "fade":
       await cmdFade(flags);
       break;
+    case "fadewatch":
+      await cmdFadeWatch(flags);
+      break;
     case "pivotfollow":
       await cmdPivotFollow(flags);
       break;
@@ -1242,6 +1310,9 @@ async function main(): Promise<void> {
           `  peeperbot fade      [--lead COREUSDT] [--target BTCUSDT,ETHUSDT] [--days 180] [--side dump|pump|both]\n` +
           `                     #   [--window 30] [--hold 30] [--lead-move 1.5] [--own-move 0.15] [--skip-days 0]\n` +
           `                     # backtest: lead + major dumped together → bet the major bounces\n` +
+          `  peeperbot fadewatch [--target BTCUSDT,ETHUSDT] [--for 350] [--max-late 120]\n` +
+          `                     # live: ping Telegram at the 5m close when CORE + BTC/ETH dumped together (bet UP 30m).\n` +
+          `                     # --test to ping your phone · --report to score past alerts · --once for one check\n` +
           `  peeperbot pivotfollow [--lead COREUSDT] [--follow BTCUSDT,ETHUSDT] [--days 60] [--wait 30] [--hold 35] [--dir up|down]\n` +
           `                     #   [--session london|ny|asia] [--skip-days 180]\n` +
           `                     # backtest: lead asset prints a pivot → wait → hold BTC/ETH the same way\n` +

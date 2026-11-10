@@ -22,6 +22,7 @@
     "bot:leadlag": "npm run leadlag --workspace=apps/prdt-bot --",
     "bot:pivotfollow": "npm run pivotfollow --workspace=apps/prdt-bot --",
     "bot:fade": "npm run fade --workspace=apps/prdt-bot --",
+    "bot:fadewatch": "npm run fadewatch --workspace=apps/prdt-bot --",
     "bot:log": "npm run log --workspace=apps/prdt-bot --",
     "bot:autopsy": "npm run autopsy --workspace=apps/prdt-bot --",
     "bot:follow": "npm run follow --workspace=apps/prdt-bot --",

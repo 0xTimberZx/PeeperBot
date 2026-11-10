@@ -504,6 +504,33 @@ npm run bot:fade -- --days 540 --json
 - `--side pump` fades joint rises (bet DOWN). That side is weaker and only shows
   on BTC/ETH; `dump` is the default for a reason.
 
+### Live alerts (`peeperbot fadewatch`)
+
+Pings Telegram the moment the setup above is live on BTC or ETH. It never trades.
+
+```bash
+npm run bot:fadewatch -- --test     # canned ping: proves Telegram delivery
+npm run bot:fadewatch               # watch: wakes ~3s after every 5m close
+npm run bot:fadewatch -- --report   # score every past alert against price
+# flags: --target BTCUSDT,ETHUSDT --for 200 (minutes, then exit) --max-late 120 --once
+# env:   FADE_TARGETS FADE_LEAD_MOVE_PCT FADE_OWN_MOVE_PCT FADE_HOLD_MIN FADE_MAX_LATE_SEC
+```
+
+- **Be fast.** The backtest enters at the 5m close. Entering one bar (5 minutes)
+  late drops BTC from 56.5% to 54.2% and ETH from 57.4% to 52.7% — breakeven. Each
+  alert says how many seconds old it is, and a setup found more than
+  `--max-late` seconds after its close is skipped, not sent.
+- **One call at a time** per token: no second alert until the first has settled,
+  exactly as the backtest counts trades.
+- **Journal**: every alert is appended to `data/fade-journal.jsonl` (intent only —
+  direction, prices, settle time). `--report` recomputes win/loss from price,
+  scored from the price *at the alert*, so it measures what you could really get.
+  Judge it at 50+ settled calls, not before (~2 calls/day per token).
+- **Unattended**: `.github/workflows/fade-watch.yml` runs the loop on GitHub
+  Actions in back-to-back ~3h20m jobs (a cron tick every 5 minutes would arrive
+  too late to be this trade). It uses the same `TELEGRAM_BOT_TOKEN` /
+  `TELEGRAM_CHAT_ID` secrets as the other watchers.
+
 ## Trade BTC/ETH off a CORE pivot (`peeperbot pivotfollow`)
 
 Tests one plan: CORE prints a swing pivot, you wait 30 minutes, then hold BTC or

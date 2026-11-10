@@ -23,6 +23,7 @@
     "leadlag": "tsx src/cli.ts leadlag",
     "pivotfollow": "tsx src/cli.ts pivotfollow",
     "fade": "tsx src/cli.ts fade",
+    "fadewatch": "tsx src/cli.ts fadewatch",
     "log": "tsx src/cli.ts log",
     "autopsy": "tsx src/cli.ts autopsy",
     "follow": "tsx src/cli.ts follow",
