@@ -38,6 +38,7 @@ import {
 import { analyzeLeadLag, formatLeadLag, DEFAULT_LEADLAG_PARAMS, type LeadLagParams } from "./analysis/leadLag.js";
 import { analyzeFade, formatFade, DEFAULT_FADE_PARAMS, type FadeParams, type FadeSide } from "./analysis/fade.js";
 import { FadeWatcher, FadeJournal, fadeWatchConfigFromEnv, scoreFadeCalls } from "./watch/fadeWatch.js";
+import { FadeOutcomeLog, TelegramInbox, callKey, formatRecord, latestOutcomes, yourRecord } from "./watch/fadeReplies.js";
 import { analyzePivotFollow, formatPivotFollow, DEFAULT_PIVOTFOLLOW_PARAMS, type PivotFollowParams } from "./analysis/pivotFollow.js";
 import { RegimeMonitor, regimeConfigFromEnv } from "./regime/run.js";
 import { TraderFollowWatcher, followConfigFromEnv, sourceFromEnv, makePriceAt, venueWarnings } from "./social/run.js";
@@ -816,11 +817,28 @@ async function cmdFadeWatch(flags: Map<string, string>): Promise<void> {
       console.log(`average alert delay ${late.toFixed(0)}s after the 5m close`);
       if (score.settled < 50) console.log(`Fewer than 50 settled calls: too few to compare with the backtest yet.`);
     }
+    // What you reported back by replying to the alerts in Telegram.
+    const answers = latestOutcomes(new FadeOutcomeLog(watchCfg.outcomesPath ?? "./data/fade-outcomes.jsonl").readAll());
+    const mine = yourRecord(calls, answers);
+    if (calls.length > 0) {
+      console.log(`\n${formatRecord(mine)} · ${mine.unanswered} unanswered`);
+      const disagree = calls.filter((c) => {
+        const said = answers.get(callKey(c));
+        const price = score.byCall[callKey(c)];
+        return (said === "won" || said === "lost") && price !== undefined && (said === "won") !== price;
+      });
+      if (disagree.length > 0) {
+        console.log(`${disagree.length} of your answers differ from the price-scored result (late entry or a different strike):`);
+        for (const c of disagree) console.log(`  ${c.symbol} ${c.bet} ${new Date(c.ts).toISOString().slice(0, 16)}Z  you: ${answers.get(callKey(c))}  price: ${score.byCall[callKey(c)] ? "won" : "lost"}`);
+      }
+    }
     console.log("═══════════════════════════════════\n");
     return;
   }
 
-  const watcher = new FadeWatcher(watchCfg, dispatcher);
+  const { telegramBotToken, telegramChatId } = cfg.alerts;
+  const inbox = telegramBotToken && telegramChatId ? new TelegramInbox(telegramBotToken, telegramChatId) : null;
+  const watcher = new FadeWatcher(watchCfg, dispatcher, undefined, inbox);
   if (flags.get("once") === "true") {
     await watcher.runOnce();
     return;
@@ -1313,6 +1331,7 @@ async function main(): Promise<void> {
           `  peeperbot fadewatch [--target BTCUSDT,ETHUSDT] [--for 350] [--max-late 120]\n` +
           `                     # live: ping Telegram at the 5m close when CORE + BTC/ETH dumped together (bet UP 30m).\n` +
           `                     # --test to ping your phone · --report to score past alerts · --once for one check\n` +
+          `                     # reply won / lost / missed to an alert in Telegram to log your own result\n` +
           `  peeperbot pivotfollow [--lead COREUSDT] [--follow BTCUSDT,ETHUSDT] [--days 60] [--wait 30] [--hold 35] [--dir up|down]\n` +
           `                     #   [--session london|ny|asia] [--skip-days 180]\n` +
           `                     # backtest: lead asset prints a pivot → wait → hold BTC/ETH the same way\n` +

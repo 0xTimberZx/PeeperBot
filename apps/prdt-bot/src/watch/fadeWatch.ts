@@ -18,6 +18,7 @@ import { AlertDispatcher, type Alert } from "../alerts.js";
 import { DEFAULT_FADE_PARAMS, type FadeParams } from "../analysis/fade.js";
 import { wilsonLower } from "../analysis/leadLag.js";
 import type { Dir } from "../analysis/prdtJournal.js";
+import { FadeOutcomeLog, handleReplies, type TelegramInbox } from "./fadeReplies.js";
 
 export interface FadeSignal {
   /** Close time (ms) of the 5m bar that completed the setup = backtest entry. */
@@ -70,6 +71,8 @@ export interface FadeCall {
   holdMin: number;
   leadPct: number;
   ownPct: number;
+  /** Telegram's id for the alert message, so a reply to it can be matched. */
+  telegramMessageId?: number;
 }
 
 export class FadeJournal {
@@ -108,6 +111,8 @@ export interface FadeScore {
   winRate: number;
   wilsonLow: number;
   bySymbol: Record<string, { n: number; wins: number }>;
+  /** Price-scored result per settled call, keyed `SYMBOL@barClose`. */
+  byCall: Record<string, boolean>;
 }
 
 /**
@@ -119,7 +124,7 @@ export async function scoreFadeCalls(
   now: number,
   priceAt: (symbol: string, ts: number) => Promise<number | null>
 ): Promise<FadeScore> {
-  const score: FadeScore = { settled: 0, pending: 0, wins: 0, winRate: 0, wilsonLow: 0, bySymbol: {} };
+  const score: FadeScore = { settled: 0, pending: 0, wins: 0, winRate: 0, wilsonLow: 0, bySymbol: {}, byCall: {} };
   for (const c of calls) {
     const settle = c.settleAt <= now ? await priceAt(c.symbol, c.settleAt) : null;
     if (settle === null) {
@@ -127,6 +132,7 @@ export async function scoreFadeCalls(
       continue;
     }
     const won = c.bet === "UP" ? settle > c.alertPrice : settle < c.alertPrice;
+    score.byCall[`${c.symbol}@${c.barClose}`] = won;
     const s = (score.bySymbol[c.symbol] ??= { n: 0, wins: 0 });
     s.n++;
     score.settled++;
@@ -151,6 +157,8 @@ export interface FadeWatchConfig {
   wakeOffsetSec: number;
   statePath: string | null;
   journalPath: string | null;
+  /** Where your Telegram replies (won / lost / missed) are logged. */
+  outcomesPath: string | null;
   /** Backtest win rate to quote in the alert, per target. */
   backtest: Record<string, number>;
   breakeven: number;
@@ -161,6 +169,8 @@ interface FadeState {
   openUntil: Record<string, number>;
   /** Per target: the last signal bar already handled (alerted or skipped as stale). */
   handled: Record<string, number>;
+  /** Next Telegram update id to read, so replies are processed once. */
+  tgOffset?: number;
 }
 
 type Fetch = (symbol: string, interval: Interval, limit: number) => Promise<Candle[]>;
@@ -172,13 +182,61 @@ export class FadeWatcher {
   private running = false;
   private state: FadeState = { openUntil: {}, handled: {} };
   private readonly journal: FadeJournal | null;
+  private readonly outcomes: FadeOutcomeLog | null;
 
   constructor(
     private readonly cfg: FadeWatchConfig,
     private readonly dispatcher: AlertDispatcher,
-    private readonly fetch: Fetch = (symbol, interval, limit) => fetchKlines({ symbol, interval, limit })
+    private readonly fetch: Fetch = (symbol, interval, limit) => fetchKlines({ symbol, interval, limit }),
+    /** Reads your won / lost / missed replies. Null = replies are not read. */
+    private readonly inbox: TelegramInbox | null = null
   ) {
     this.journal = cfg.journalPath ? new FadeJournal(cfg.journalPath) : null;
+    this.outcomes = cfg.outcomesPath ? new FadeOutcomeLog(cfg.outcomesPath) : null;
+  }
+
+  /**
+   * Read new Telegram messages, log any result you reported and answer it.
+   * `waitSec` > 0 long-polls, so a reply is acknowledged within seconds.
+   */
+  async checkReplies(waitSec: number): Promise<void> {
+    if (this.inbox === null || this.journal === null || this.outcomes === null) return;
+    const { messages, next } = await this.inbox.poll(this.state.tgOffset ?? 0, waitSec);
+    if (next !== (this.state.tgOffset ?? 0)) {
+      this.state.tgOffset = next;
+      this.persist();
+    }
+    if (messages.length === 0) return;
+    const actions = handleReplies(messages, this.journal.readAll(), this.outcomes.readAll(), this.inbox.chatId);
+    for (const a of actions) {
+      if (a.outcome !== undefined) {
+        this.outcomes.append(a.outcome);
+        console.log(`[fadewatch] reply logged: ${a.outcome.symbol} @${hhmm(a.outcome.barClose + 1)} UTC → ${a.outcome.outcome}`);
+      }
+      try {
+        await this.inbox.reply(a.replyTo, a.text);
+      } catch (err) {
+        console.error("[fadewatch] could not answer a reply:", (err as Error).message);
+      }
+    }
+  }
+
+  /** Sleep until `t`, reading Telegram replies while waiting when an inbox is set. */
+  private async waitUntil(t: number): Promise<void> {
+    while (this.running && Date.now() < t) {
+      const leftSec = (t - Date.now()) / 1000;
+      if (this.inbox === null || leftSec < 3) {
+        await sleep(t - Date.now(), () => this.running);
+        continue;
+      }
+      try {
+        await this.checkReplies(Math.min(25, leftSec - 2));
+      } catch (err) {
+        // e.g. 409 when a webhook is set on the bot: back off rather than flood the log.
+        console.error("[fadewatch] reading replies failed:", (err as Error).message);
+        await sleep(Math.min(60_000, t - Date.now()), () => this.running);
+      }
+    }
   }
 
   private get barMs(): number {
@@ -240,7 +298,8 @@ export class FadeWatcher {
         live: false,
         ts: now,
       };
-      await this.dispatcher.dispatch(alert);
+      const receipts = await this.dispatcher.dispatch(alert);
+      const telegramMessageId = receipts["telegram"]?.messageId;
       this.journal?.append({
         ts: now,
         symbol,
@@ -254,6 +313,7 @@ export class FadeWatcher {
         holdMin,
         leadPct: sig.leadPct,
         ownPct: sig.ownPct,
+        ...(telegramMessageId === undefined ? {} : { telegramMessageId }),
       });
     }
     this.persist();
@@ -264,7 +324,7 @@ export class FadeWatcher {
     if (!this.cfg.statePath) return;
     try {
       const s = JSON.parse(readFileSync(this.cfg.statePath, "utf8")) as Partial<FadeState>;
-      this.state = { openUntil: s.openUntil ?? {}, handled: s.handled ?? {} };
+      this.state = { openUntil: s.openUntil ?? {}, handled: s.handled ?? {}, ...(s.tgOffset === undefined ? {} : { tgOffset: s.tgOffset }) };
     } catch {
       this.state = { openUntil: {}, handled: {} };
     }
@@ -284,7 +344,8 @@ export class FadeWatcher {
     const p = this.cfg.params;
     console.log(
       `[fadewatch] ${mode} · ${this.cfg.lead} ≥ ${(p.leadMovePct * 100).toFixed(2)}% + ${this.cfg.targets.join("/")} ≥ ${(p.ownMovePct * 100).toFixed(2)}% ` +
-        `(${p.side}) → ${p.holdBars * (this.barMs / 60_000)}m · max late ${this.cfg.maxLateSec}s · alerts=[${this.dispatcher.channelNames.join(",")}]`
+        `(${p.side}) → ${p.holdBars * (this.barMs / 60_000)}m · max late ${this.cfg.maxLateSec}s · alerts=[${this.dispatcher.channelNames.join(",")}]` +
+        ` · replies=${this.inbox === null ? "off" : "on"}`
     );
   }
 
@@ -293,6 +354,11 @@ export class FadeWatcher {
     this.loadState();
     this.banner("one-shot");
     if (!(await this.tick(Date.now()))) console.log("[fadewatch] latest bar not printed yet — nothing evaluated");
+    try {
+      await this.checkReplies(0);
+    } catch (err) {
+      console.error("[fadewatch] reading replies failed:", (err as Error).message);
+    }
   }
 
   /** Wake just after every bar close until stopped (or `forMinutes` elapse). */
@@ -303,7 +369,7 @@ export class FadeWatcher {
     const deadline = forMinutes === undefined ? Infinity : Date.now() + forMinutes * 60_000;
     while (this.running && Date.now() < deadline) {
       const nextWake = (Math.floor(Date.now() / this.barMs) + 1) * this.barMs + this.cfg.wakeOffsetSec * 1000;
-      await sleep(Math.min(nextWake, deadline) - Date.now(), () => this.running);
+      await this.waitUntil(Math.min(nextWake, deadline));
       if (!this.running || Date.now() >= deadline) break;
       // The exchange can take a few seconds to print the closed bar: retry briefly.
       for (let attempt = 0; attempt < 5 && this.running; attempt++) {
@@ -349,6 +415,7 @@ export function fadeWatchConfigFromEnv(opts: { lead: string; breakeven: number }
     wakeOffsetSec: num("FADE_WAKE_OFFSET_SEC", 3),
     statePath: raw("FADE_STATE_PATH") ?? "./data/fadewatch-state.json",
     journalPath: raw("FADE_JOURNAL_PATH") ?? "./data/fade-journal.jsonl",
+    outcomesPath: raw("FADE_OUTCOMES_PATH") ?? "./data/fade-outcomes.jsonl",
     // 540 days to 2026-11-10, OKX 5m candles, entry at the bar close.
     backtest: { BTCUSDT: 0.564, ETHUSDT: 0.573 },
     breakeven: opts.breakeven,

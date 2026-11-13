@@ -24,9 +24,15 @@ export interface Alert {
   kind?: "trade" | "info";
 }
 
+/** What a channel can report back about a message it sent. */
+export interface SendReceipt {
+  /** Telegram's id for the sent message, so replies to it can be matched. */
+  messageId?: number;
+}
+
 export interface AlertChannel {
   readonly name: string;
-  send(alert: Alert): Promise<void>;
+  send(alert: Alert): Promise<SendReceipt | void>;
 }
 
 export function formatAlert(a: Alert): string {
@@ -57,7 +63,7 @@ export class ConsoleChannel implements AlertChannel {
 export class TelegramChannel implements AlertChannel {
   readonly name = "telegram";
   constructor(private readonly botToken: string, private readonly chatId: string) {}
-  async send(alert: Alert): Promise<void> {
+  async send(alert: Alert): Promise<SendReceipt> {
     const url = `https://api.telegram.org/bot${this.botToken}/sendMessage`;
     const res = await fetch(url, {
       method: "POST",
@@ -65,6 +71,9 @@ export class TelegramChannel implements AlertChannel {
       body: JSON.stringify({ chat_id: this.chatId, text: formatAlert(alert) }),
     });
     if (!res.ok) throw new Error(`telegram ${res.status} ${res.statusText}`);
+    const body = (await res.json().catch(() => ({}))) as { result?: { message_id?: number } };
+    const id = body.result?.message_id;
+    return id === undefined ? {} : { messageId: id };
   }
 }
 
@@ -85,16 +94,19 @@ export class DiscordChannel implements AlertChannel {
 export class AlertDispatcher {
   constructor(private readonly channels: AlertChannel[]) {}
 
-  async dispatch(alert: Alert): Promise<void> {
+  /** Send to every channel; returns the receipts of those that succeeded, by channel name. */
+  async dispatch(alert: Alert): Promise<Record<string, SendReceipt>> {
+    const receipts: Record<string, SendReceipt> = {};
     await Promise.all(
       this.channels.map(async (ch) => {
         try {
-          await ch.send(alert);
+          receipts[ch.name] = (await ch.send(alert)) ?? {};
         } catch (err) {
           console.error(`[alerts] channel "${ch.name}" failed:`, (err as Error).message);
         }
       })
     );
+    return receipts;
   }
 
   get channelNames(): string[] {

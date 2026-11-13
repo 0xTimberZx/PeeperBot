@@ -526,6 +526,14 @@ npm run bot:fadewatch -- --report   # score every past alert against price
   direction, prices, settle time). `--report` recomputes win/loss from price,
   scored from the price *at the alert*, so it measures what you could really get.
   Judge it at 50+ settled calls, not before (~2 calls/day per token).
+- **Reply with your result**: answer an alert in Telegram with `won`, `lost` or
+  `missed` and the bot logs it and replies with your running record. Synonyms
+  work (`win`, `W`, `hit`, `green`, `✅` · `loss`, `L`, `rekt`, `flat`, `❌` ·
+  `skip`, `late`, `no fill`, `didn't take`). A plain message with no reply goes
+  to the newest alert you haven't answered; replying again changes your answer,
+  and `undo` clears it. If a message reads two ways ("didn't win") it asks
+  instead of guessing. Replies go to `data/fade-outcomes.jsonl`, and `--report`
+  shows your record next to the price-scored one and lists where they differ.
 - **Unattended**: `.github/workflows/fade-watch.yml` runs the loop on GitHub
   Actions in back-to-back ~3h20m jobs (a cron tick every 5 minutes would arrive
   too late to be this trade). Each job starts its own successor, so it does not

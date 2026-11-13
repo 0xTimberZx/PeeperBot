@@ -38,6 +38,7 @@ function watcher(series: Record<string, Candle[]>, over: Partial<FadeWatchConfig
     wakeOffsetSec: 3,
     statePath: null,
     journalPath: null,
+    outcomesPath: null,
     backtest: { BTCUSDT: 0.564 },
     breakeven: 0.526,
     ...over,
@@ -91,7 +92,7 @@ describe("FadeWatcher", () => {
     const ch = new Capture();
     let n = 3;
     const w = new FadeWatcher(
-      { lead: "COREUSDT", targets: ["BTCUSDT"], interval: "5m", params: P, maxLateSec: 120, wakeOffsetSec: 3, statePath: null, journalPath: null, backtest: {}, breakeven: 0.526 },
+      { lead: "COREUSDT", targets: ["BTCUSDT"], interval: "5m", params: P, maxLateSec: 120, wakeOffsetSec: 3, statePath: null, journalPath: null, outcomesPath: null, backtest: {}, breakeven: 0.526 },
       new AlertDispatcher([ch]),
       async (symbol) => s[symbol as keyof typeof s].slice(0, n)
     );
@@ -126,5 +127,29 @@ describe("scoreFadeCalls", () => {
     const s = await scoreFadeCalls(calls, 5000, async (_sym, ts) => prices[ts] ?? null);
     expect(s).toMatchObject({ settled: 3, wins: 1, pending: 1 });
     expect(s.bySymbol["BTCUSDT"]).toEqual({ n: 3, wins: 1 });
+  });
+});
+
+describe("FadeWatcher replies", () => {
+  it("journals the Telegram message id so a reply can find its alert", async () => {
+    const { mkdtempSync, readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const { tmpdir } = await import("node:os");
+    const dir = mkdtempSync(join(tmpdir(), "fadewatch-"));
+    class FakeTelegram implements AlertChannel {
+      readonly name = "telegram";
+      async send(): Promise<{ messageId: number }> {
+        return { messageId: 4242 };
+      }
+    }
+    const series = { COREUSDT: candles([100, 100, 98]), BTCUSDT: candles([100, 100, 99.5]) };
+    const w = new FadeWatcher(
+      { lead: "COREUSDT", targets: ["BTCUSDT"], interval: "5m", params: P, maxLateSec: 120, wakeOffsetSec: 3, statePath: null,
+        journalPath: join(dir, "j.jsonl"), outcomesPath: join(dir, "o.jsonl"), backtest: {}, breakeven: 0.526 },
+      new AlertDispatcher([new FakeTelegram()]),
+      async (symbol) => series[symbol as keyof typeof series]
+    );
+    await w.tick(3 * BAR + 4000);
+    expect(JSON.parse(readFileSync(join(dir, "j.jsonl"), "utf8").trim()).telegramMessageId).toBe(4242);
   });
 });
