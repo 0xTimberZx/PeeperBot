@@ -19,7 +19,10 @@ name: Fade watch
 # the workflow. After a failure it retries, but gives up after 3 in a row so a
 # broken build cannot loop forever.
 #
-# State: the open-call latch and the alert journal live in apps/prdt-bot/data
+# Replies: answer an alert in Telegram with won / lost / missed (or a synonym,
+# ✅ / ❌) and the bot logs it and replies with your running record.
+#
+# State: the open-call latch, the alert journal and your replies live in apps/prdt-bot/data
 # and are carried between jobs by actions/cache. The journal is also uploaded as
 # an artifact on every run, and the live record is printed at the end of each job.
 #
@@ -63,6 +66,7 @@ jobs:
           path: |
             apps/prdt-bot/data/fadewatch-state.json
             apps/prdt-bot/data/fade-journal.jsonl
+            apps/prdt-bot/data/fade-outcomes.jsonl
           key: fade-watch-${{ github.run_id }}
           restore-keys: |
             fade-watch-
@@ -101,13 +105,16 @@ jobs:
           path: |
             apps/prdt-bot/data/fadewatch-state.json
             apps/prdt-bot/data/fade-journal.jsonl
+            apps/prdt-bot/data/fade-outcomes.jsonl
           key: fade-watch-${{ github.run_id }}
       - name: Upload journal
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: fade-journal
-          path: apps/prdt-bot/data/fade-journal.jsonl
+          path: |
+            apps/prdt-bot/data/fade-journal.jsonl
+            apps/prdt-bot/data/fade-outcomes.jsonl
           if-no-files-found: ignore
       # Last step on purpose: the successor queues behind this job and starts
       # seconds after it exits. Skipped for test/report runs and when cancelled.
