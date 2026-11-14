@@ -19,6 +19,9 @@ name: Fade watch
 # the workflow. After a failure it retries, but gives up after 3 in a row so a
 # broken build cannot loop forever.
 #
+# Reviews: when a call settles, the bot replies under the alert with how it
+# played out — clean win, narrow loss, gave it back, or a complete blowout.
+#
 # Replies: answer an alert in Telegram with won / lost / missed (or a synonym,
 # ✅ / ❌) and the bot logs it and replies with your running record.
 #
@@ -67,11 +70,20 @@ jobs:
             apps/prdt-bot/data/fadewatch-state.json
             apps/prdt-bot/data/fade-journal.jsonl
             apps/prdt-bot/data/fade-outcomes.jsonl
+            apps/prdt-bot/data/fade-reviews.jsonl
           key: fade-watch-${{ github.run_id }}
           restore-keys: |
             fade-watch-
       - name: Install dependencies
         run: npm ci
+      # Grade any settled call the last job didn't get to (no messages sent).
+      - name: Review past calls
+        if: github.event.inputs.test != 'true' && github.event.inputs.report != 'true'
+        continue-on-error: true
+        env:
+          FEED_SOURCE: okx
+          FEED_FALLBACKS: bybit
+        run: npm run fadewatch --workspace=apps/prdt-bot -- --review
       - name: Watch
         id: watch
         env:
@@ -106,6 +118,7 @@ jobs:
             apps/prdt-bot/data/fadewatch-state.json
             apps/prdt-bot/data/fade-journal.jsonl
             apps/prdt-bot/data/fade-outcomes.jsonl
+            apps/prdt-bot/data/fade-reviews.jsonl
           key: fade-watch-${{ github.run_id }}
       - name: Upload journal
         if: always()
@@ -115,6 +128,7 @@ jobs:
           path: |
             apps/prdt-bot/data/fade-journal.jsonl
             apps/prdt-bot/data/fade-outcomes.jsonl
+            apps/prdt-bot/data/fade-reviews.jsonl
           if-no-files-found: ignore
       # Last step on purpose: the successor queues behind this job and starts
       # seconds after it exits. Skipped for test/report runs and when cancelled.

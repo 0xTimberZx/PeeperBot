@@ -18,7 +18,8 @@ import { AlertDispatcher, type Alert } from "../alerts.js";
 import { DEFAULT_FADE_PARAMS, type FadeParams } from "../analysis/fade.js";
 import { wilsonLower } from "../analysis/leadLag.js";
 import type { Dir } from "../analysis/prdtJournal.js";
-import { FadeOutcomeLog, handleReplies, type TelegramInbox } from "./fadeReplies.js";
+import { FadeOutcomeLog, callKey, handleReplies, latestOutcomes, type TelegramInbox } from "./fadeReplies.js";
+import { FadeReviewLog, formatReviewMessage, reviewFadeCall } from "./fadeReview.js";
 
 export interface FadeSignal {
   /** Close time (ms) of the 5m bar that completed the setup = backtest entry. */
@@ -159,6 +160,10 @@ export interface FadeWatchConfig {
   journalPath: string | null;
   /** Where your Telegram replies (won / lost / missed) are logged. */
   outcomesPath: string | null;
+  /** Where the post-settle review of each call is logged. */
+  reviewsPath: string | null;
+  /** Share of backtest trades per target that were blowouts, quoted when one happens live. */
+  backtestBlowoutRate: Record<string, number>;
   /** Backtest win rate to quote in the alert, per target. */
   backtest: Record<string, number>;
   breakeven: number;
@@ -173,7 +178,10 @@ interface FadeState {
   tgOffset?: number;
 }
 
-type Fetch = (symbol: string, interval: Interval, limit: number) => Promise<Candle[]>;
+type Fetch = (symbol: string, interval: Interval, limit: number, endTime?: number) => Promise<Candle[]>;
+
+/** Calls that settled longer ago than this are not reviewed by the live loop (use --review). */
+const REVIEW_MAX_AGE_MS = 6 * 3_600_000;
 
 const pct = (x: number): string => `${x >= 0 ? "+" : ""}${(x * 100).toFixed(2)}%`;
 const hhmm = (t: number): string => new Date(t).toISOString().slice(11, 16);
@@ -183,16 +191,67 @@ export class FadeWatcher {
   private state: FadeState = { openUntil: {}, handled: {} };
   private readonly journal: FadeJournal | null;
   private readonly outcomes: FadeOutcomeLog | null;
+  private readonly reviews: FadeReviewLog | null;
 
   constructor(
     private readonly cfg: FadeWatchConfig,
     private readonly dispatcher: AlertDispatcher,
-    private readonly fetch: Fetch = (symbol, interval, limit) => fetchKlines({ symbol, interval, limit }),
+    private readonly fetch: Fetch = (symbol, interval, limit, endTime) =>
+      fetchKlines({ symbol, interval, limit, ...(endTime === undefined ? {} : { endTime }) }),
     /** Reads your won / lost / missed replies. Null = replies are not read. */
     private readonly inbox: TelegramInbox | null = null
   ) {
     this.journal = cfg.journalPath ? new FadeJournal(cfg.journalPath) : null;
     this.outcomes = cfg.outcomesPath ? new FadeOutcomeLog(cfg.outcomesPath) : null;
+    this.reviews = cfg.reviewsPath ? new FadeReviewLog(cfg.reviewsPath) : null;
+  }
+
+  /**
+   * Review every call that has settled and not been reviewed yet: grade how it
+   * played out and, with `notify`, reply under the original alert. Calls whose
+   * candles are not complete yet are left for the next pass.
+   */
+  async reviewSettled(now: number, opts: { notify?: boolean; maxAgeMs?: number } = {}): Promise<number> {
+    if (this.journal === null || this.reviews === null) return 0;
+    const notify = opts.notify ?? true;
+    const maxAge = opts.maxAgeMs ?? REVIEW_MAX_AGE_MS;
+    const done = new Set(this.reviews.readAll().map((r) => callKey(r)));
+    // A minute and a half after the settle, so the last 1m candle has printed.
+    const due = this.journal.readAll().filter((c) => !done.has(callKey(c)) && c.settleAt + 90_000 <= now && now - c.settleAt <= maxAge);
+    if (due.length === 0) return 0;
+    const answers = this.outcomes === null ? new Map() : latestOutcomes(this.outcomes.readAll());
+    let reviewed = 0;
+    for (const call of due) {
+      let review;
+      try {
+        review = await reviewFadeCall(call, call.lead, this.fetch);
+      } catch (err) {
+        console.error(`[fadewatch] review of ${callKey(call)} failed:`, (err as Error).message);
+        continue;
+      }
+      if (review === null) continue; // candles not complete yet: next pass
+      this.reviews.append({ ...review, reviewedAt: now, symbol: call.symbol, barClose: call.barClose, bet: call.bet, alertTs: call.ts, entryPrice: call.alertPrice });
+      reviewed++;
+      const text = formatReviewMessage(call, review, {
+        lead: call.lead,
+        leadMovePct: this.cfg.params.leadMovePct,
+        ...(this.cfg.backtestBlowoutRate[call.symbol] === undefined ? {} : { backtestBlowoutRate: this.cfg.backtestBlowoutRate[call.symbol]! }),
+        ...(answers.has(callKey(call)) ? { yourAnswer: answers.get(callKey(call)) } : {}),
+      });
+      console.log(`[fadewatch] reviewed ${call.symbol} @${hhmm(call.ts)} UTC → ${review.grade}`);
+      if (!notify) continue;
+      try {
+        if (this.inbox !== null && call.telegramMessageId !== undefined) await this.inbox.reply(call.telegramMessageId, text);
+        else
+          await this.dispatcher.dispatch({
+            symbol: call.symbol, timeframeMin: call.holdMin, direction: call.bet, confidence: 0, entryPrice: call.alertPrice,
+            reason: text, strategy: "fade-review", live: false, ts: now, kind: "info",
+          });
+      } catch (err) {
+        console.error("[fadewatch] could not send a review:", (err as Error).message);
+      }
+    }
+    return reviewed;
   }
 
   /**
@@ -317,6 +376,12 @@ export class FadeWatcher {
       });
     }
     this.persist();
+    // Never let a review problem get in the way of the next alert.
+    try {
+      await this.reviewSettled(now);
+    } catch (err) {
+      console.error("[fadewatch] reviewing settled calls failed:", (err as Error).message);
+    }
     return true;
   }
 
@@ -416,6 +481,9 @@ export function fadeWatchConfigFromEnv(opts: { lead: string; breakeven: number }
     statePath: raw("FADE_STATE_PATH") ?? "./data/fadewatch-state.json",
     journalPath: raw("FADE_JOURNAL_PATH") ?? "./data/fade-journal.jsonl",
     outcomesPath: raw("FADE_OUTCOMES_PATH") ?? "./data/fade-outcomes.jsonl",
+    reviewsPath: raw("FADE_REVIEWS_PATH") ?? "./data/fade-reviews.jsonl",
+    // 540 days to 2026-11-10: share of backtest trades graded a complete blowout.
+    backtestBlowoutRate: { BTCUSDT: 0.051, ETHUSDT: 0.047 },
     // 540 days to 2026-11-10, OKX 5m candles, entry at the bar close.
     backtest: { BTCUSDT: 0.564, ETHUSDT: 0.573 },
     breakeven: opts.breakeven,

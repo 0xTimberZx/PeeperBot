@@ -38,7 +38,7 @@ function watcher(series: Record<string, Candle[]>, over: Partial<FadeWatchConfig
     wakeOffsetSec: 3,
     statePath: null,
     journalPath: null,
-    outcomesPath: null,
+    outcomesPath: null, reviewsPath: null, backtestBlowoutRate: {},
     backtest: { BTCUSDT: 0.564 },
     breakeven: 0.526,
     ...over,
@@ -92,7 +92,7 @@ describe("FadeWatcher", () => {
     const ch = new Capture();
     let n = 3;
     const w = new FadeWatcher(
-      { lead: "COREUSDT", targets: ["BTCUSDT"], interval: "5m", params: P, maxLateSec: 120, wakeOffsetSec: 3, statePath: null, journalPath: null, outcomesPath: null, backtest: {}, breakeven: 0.526 },
+      { lead: "COREUSDT", targets: ["BTCUSDT"], interval: "5m", params: P, maxLateSec: 120, wakeOffsetSec: 3, statePath: null, journalPath: null, outcomesPath: null, reviewsPath: null, backtestBlowoutRate: {}, backtest: {}, breakeven: 0.526 },
       new AlertDispatcher([ch]),
       async (symbol) => s[symbol as keyof typeof s].slice(0, n)
     );
@@ -145,11 +145,61 @@ describe("FadeWatcher replies", () => {
     const series = { COREUSDT: candles([100, 100, 98]), BTCUSDT: candles([100, 100, 99.5]) };
     const w = new FadeWatcher(
       { lead: "COREUSDT", targets: ["BTCUSDT"], interval: "5m", params: P, maxLateSec: 120, wakeOffsetSec: 3, statePath: null,
-        journalPath: join(dir, "j.jsonl"), outcomesPath: join(dir, "o.jsonl"), backtest: {}, breakeven: 0.526 },
+        journalPath: join(dir, "j.jsonl"), outcomesPath: join(dir, "o.jsonl"), reviewsPath: null, backtestBlowoutRate: {}, backtest: {}, breakeven: 0.526 },
       new AlertDispatcher([new FakeTelegram()]),
       async (symbol) => series[symbol as keyof typeof series]
     );
     await w.tick(3 * BAR + 4000);
     expect(JSON.parse(readFileSync(join(dir, "j.jsonl"), "utf8").trim()).telegramMessageId).toBe(4242);
+  });
+});
+
+describe("FadeWatcher reviews", () => {
+  it("reviews a settled call once and replies under the original alert", async () => {
+    const { mkdtempSync, writeFileSync, readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const { tmpdir } = await import("node:os");
+    const dir = mkdtempSync(join(tmpdir(), "fadereview-"));
+    const MIN = 60_000;
+    const T0 = 1_800_000_000_000; // alert time, a 5m close
+    const call = {
+      ts: T0 + 3000, symbol: "BTCUSDT", lead: "COREUSDT", bet: "UP", barClose: T0 - 1, lateSec: 3, signalClose: 100,
+      alertPrice: 100, settleAt: T0 + 3000 + 30 * MIN, holdMin: 30, leadPct: -0.02, ownPct: -0.005, telegramMessageId: 77,
+    };
+    writeFileSync(join(dir, "j.jsonl"), JSON.stringify(call) + "\n");
+    // BTC slides from 100 to 99 over the hold, never above the strike; CORE keeps falling.
+    const oneMin = (start: number, n: number, f: (i: number) => number): Candle[] =>
+      Array.from({ length: n }, (_, i) => {
+        const px = f(i);
+        return { openTime: start + i * MIN, open: px, high: px, low: px - 0.01, close: px, volume: 1, closeTime: start + (i + 1) * MIN - 1 };
+      });
+    const fivem: Candle[] = Array.from({ length: 289 }, (_, i) => {
+      const px = Math.floor(i / 6) % 2 === 0 ? 100 : 100.4; // typical 30m move ≈ 0.4%
+      return { openTime: T0 - (289 - i) * 5 * MIN, open: px, high: px, low: px, close: px, volume: 1, closeTime: T0 - (288 - i) * 5 * MIN - 1 };
+    });
+    const fetch = async (symbol: string, interval: string): Promise<Candle[]> => {
+      if (interval === "5m") return fivem;
+      return symbol === "BTCUSDT" ? oneMin(T0, 31, (i) => 100 - (i + 1) / 31) : oneMin(T0, 31, (i) => 1 - (i * 0.0007));
+    };
+    const replies: { to: number; text: string }[] = [];
+    const inbox = { chatId: "42", poll: async () => ({ messages: [], next: 0 }), reply: async (to: number, text: string) => void replies.push({ to, text }) };
+    const w = new FadeWatcher(
+      { lead: "COREUSDT", targets: ["BTCUSDT"], interval: "5m", params: { ...P, leadMovePct: 0.015 }, maxLateSec: 120, wakeOffsetSec: 3,
+        statePath: null, journalPath: join(dir, "j.jsonl"), outcomesPath: join(dir, "o.jsonl"), reviewsPath: join(dir, "r.jsonl"),
+        backtestBlowoutRate: { BTCUSDT: 0.051 }, backtest: {}, breakeven: 0.526 },
+      new AlertDispatcher([]),
+      fetch,
+      inbox as never
+    );
+    expect(await w.reviewSettled(call.settleAt + 30_000)).toBe(0); // last candle not printed yet
+    expect(await w.reviewSettled(call.settleAt + 120_000)).toBe(1);
+    expect(await w.reviewSettled(call.settleAt + 400_000)).toBe(0); // only once
+    expect(replies).toHaveLength(1);
+    expect(replies[0]!.to).toBe(77);
+    expect(replies[0]!.text).toContain("BTCUSDT UP from");
+    expect(replies[0]!.text).toContain("LOST — complete blowout");
+    expect(replies[0]!.text).toContain("CORE kept falling");
+    expect(replies[0]!.text).toContain("Blowouts were 5.1% of backtest trades");
+    expect(JSON.parse(readFileSync(join(dir, "r.jsonl"), "utf8").trim())).toMatchObject({ symbol: "BTCUSDT", grade: "blowout" });
   });
 });

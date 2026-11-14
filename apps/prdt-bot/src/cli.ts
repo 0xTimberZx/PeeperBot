@@ -39,6 +39,8 @@ import { analyzeLeadLag, formatLeadLag, DEFAULT_LEADLAG_PARAMS, type LeadLagPara
 import { analyzeFade, formatFade, DEFAULT_FADE_PARAMS, type FadeParams, type FadeSide } from "./analysis/fade.js";
 import { FadeWatcher, FadeJournal, fadeWatchConfigFromEnv, scoreFadeCalls } from "./watch/fadeWatch.js";
 import { FadeOutcomeLog, TelegramInbox, callKey, formatRecord, latestOutcomes, yourRecord } from "./watch/fadeReplies.js";
+import { FadeReviewLog } from "./watch/fadeReview.js";
+import { GRADES, GRADE_LABEL } from "./analysis/callReview.js";
 import { analyzePivotFollow, formatPivotFollow, DEFAULT_PIVOTFOLLOW_PARAMS, type PivotFollowParams } from "./analysis/pivotFollow.js";
 import { RegimeMonitor, regimeConfigFromEnv } from "./regime/run.js";
 import { TraderFollowWatcher, followConfigFromEnv, sourceFromEnv, makePriceAt, venueWarnings } from "./social/run.js";
@@ -832,6 +834,17 @@ async function cmdFadeWatch(flags: Map<string, string>): Promise<void> {
         for (const c of disagree) console.log(`  ${c.symbol} ${c.bet} ${new Date(c.ts).toISOString().slice(0, 16)}Z  you: ${answers.get(callKey(c))}  price: ${score.byCall[callKey(c)] ? "won" : "lost"}`);
       }
     }
+    // How the settled calls played out, from the post-settle reviews.
+    const reviews = new FadeReviewLog(watchCfg.reviewsPath ?? "./data/fade-reviews.jsonl").readAll();
+    if (reviews.length > 0) {
+      console.log(`\nHow the ${reviews.length} reviewed calls played out (backtest blowout rate ~5%):`);
+      for (const g of GRADES) {
+        const n = reviews.filter((r) => r.grade === g).length;
+        if (n > 0) console.log(`  ${GRADE_LABEL[g].padEnd(30)} ${String(n).padStart(4)}  ${p(n / reviews.length).padStart(6)}`);
+      }
+      const recent = reviews.slice(-10).filter((r) => r.grade === "blowout").length;
+      if (recent >= 3) console.log(`⚠ ${recent} of the last ${Math.min(10, reviews.length)} calls were blowouts — far above the backtest's ~1 in 20.`);
+    }
     console.log("═══════════════════════════════════\n");
     return;
   }
@@ -839,6 +852,13 @@ async function cmdFadeWatch(flags: Map<string, string>): Promise<void> {
   const { telegramBotToken, telegramChatId } = cfg.alerts;
   const inbox = telegramBotToken && telegramChatId ? new TelegramInbox(telegramBotToken, telegramChatId) : null;
   const watcher = new FadeWatcher(watchCfg, dispatcher, undefined, inbox);
+
+  // --review: grade every settled call not reviewed yet, however old. Logs only, no messages.
+  if (flags.get("review") === "true") {
+    const n = await watcher.reviewSettled(Date.now(), { notify: false, maxAgeMs: Infinity });
+    console.log(`[fadewatch] reviewed ${n} call(s). Run --report to see how they played out.`);
+    return;
+  }
   if (flags.get("once") === "true") {
     await watcher.runOnce();
     return;
@@ -1332,6 +1352,8 @@ async function main(): Promise<void> {
           `                     # live: ping Telegram at the 5m close when CORE + BTC/ETH dumped together (bet UP 30m).\n` +
           `                     # --test to ping your phone · --report to score past alerts · --once for one check\n` +
           `                     # reply won / lost / missed to an alert in Telegram to log your own result\n` +
+          `                     # after each call settles it replies with a review (clean win … complete blowout)\n` +
+          `                     # --review grades past settled calls without messaging\n` +
           `  peeperbot pivotfollow [--lead COREUSDT] [--follow BTCUSDT,ETHUSDT] [--days 60] [--wait 30] [--hold 35] [--dir up|down]\n` +
           `                     #   [--session london|ny|asia] [--skip-days 180]\n` +
           `                     # backtest: lead asset prints a pivot → wait → hold BTC/ETH the same way\n` +
