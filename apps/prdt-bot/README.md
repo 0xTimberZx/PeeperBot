@@ -534,6 +534,26 @@ npm run bot:fadewatch -- --report   # score every past alert against price
   and `undo` clears it. If a message reads two ways ("didn't win") it asks
   instead of guessing. Replies go to `data/fade-outcomes.jsonl`, and `--report`
   shows your record next to the price-scored one and lists where they differ.
+- **Review after settle**: a minute or two after each call settles, the bot
+  replies under the alert with how it played out, from 1-minute candles: won or
+  lost, best and worst point, minutes on the winning side, and what CORE did
+  during the hold. Each call gets one grade, measured in *typical 30m moves*
+  for that token over the prior day:
+
+  | Grade | Rule | Backtest share (BTC / ETH) |
+  |---|---|---|
+  | clean win | settled ≥ 0.5 typical moves ahead | 35.9% / 35.5% |
+  | scraped a win | ahead, but by less | 20.6% / 21.9% |
+  | narrow loss | lost by < 0.5 | 9.4% / 10.3% |
+  | was right, then gave it back | was ≥ 0.5 ahead at some point, then lost | 16.5% / 14.9% |
+  | loss | lost by ≥ 0.5 | 12.5% / 12.7% |
+  | complete blowout | never ≥ 0.15 ahead and lost by ≥ 1 | 5.1% / 4.7% |
+
+  In the backtest, about two-thirds of blowouts came while CORE kept dumping
+  during the hold (versus 5% of clean wins) — the dump hadn't finished. Reviews
+  go to `data/fade-reviews.jsonl`; `--report` shows the live grade mix and warns
+  if 3 of the last 10 calls were blowouts. `--review` grades past calls without
+  sending anything.
 - **Unattended**: `.github/workflows/fade-watch.yml` runs the loop on GitHub
   Actions in back-to-back ~3h20m jobs (a cron tick every 5 minutes would arrive
   too late to be this trade). Each job starts its own successor, so it does not

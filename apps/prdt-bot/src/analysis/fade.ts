@@ -18,6 +18,10 @@
 import type { Candle } from "../feed/binance.js";
 import { alignSeries, wilsonLower, type Bucket } from "./leadLag.js";
 import { sessionOf, type Dir, type Session } from "./prdtJournal.js";
+import { GRADES, GRADE_LABEL, reviewCall, typicalMove, type Grade } from "./callReview.js";
+
+/** Bars of history behind each trade used to size a "typical" move (1 day of 5m). */
+const TYPICAL_LOOKBACK_BARS = 288;
 
 /** dump = fade a joint drop (bet UP); pump = fade a joint rise (bet DOWN). */
 export type FadeSide = "dump" | "pump" | "both";
@@ -50,6 +54,8 @@ export interface FadeEvent {
   session: Session;
   holdPct: number; // target's move over the hold (signed, raw)
   won: boolean;
+  /** How the trade played out — see `analysis/callReview.ts`. */
+  grade: Grade;
 }
 
 export interface FadeReport {
@@ -62,6 +68,8 @@ export interface FadeReport {
   bySession: Record<Session, Bucket>;
   /** Oldest → newest thirds of the sample, with the start time of each. */
   thirds: { from: number; bucket: Bucket }[];
+  /** Trades by how they played out. */
+  byGrade: Record<Grade, number>;
   /** Control: target made its move, lead did NOT confirm. */
   ownOnly: Bucket;
   /** Control: target closes up over any hold window. */
@@ -96,6 +104,13 @@ export function findFadeEvents(
     }
     const entry = target[i]!;
     const holdPct = target[i + h]!.close / entry.close - 1;
+    const review = reviewCall({
+      bet: d === 1 ? "DOWN" : "UP",
+      entryPrice: entry.close,
+      path: target.slice(i + 1, i + h + 1),
+      typicalPct: typicalMove(target.slice(Math.max(0, i - TYPICAL_LOOKBACK_BARS), i + 1), w),
+      leadHoldPct: lead[i + h]!.close / lead[i]!.close - 1,
+    });
     events.push({
       time: entry.closeTime,
       bet: d === 1 ? "DOWN" : "UP",
@@ -104,6 +119,7 @@ export function findFadeEvents(
       session: sessionOf(entry.closeTime),
       holdPct,
       won: holdPct * -d > 0,
+      grade: review?.grade ?? (holdPct * -d > 0 ? "scraped-win" : "loss"),
     });
     i += h; // one position at a time
   }
@@ -148,9 +164,12 @@ export function analyzeFade(
     return out;
   };
 
+  const byGrade = Object.fromEntries(GRADES.map((g) => [g, events.filter((e) => e.grade === g).length])) as Record<Grade, number>;
+
   return {
     params,
     bars: target.length,
+    byGrade,
     firstTime,
     lastTime,
     all: bucketOf(events),
@@ -206,6 +225,13 @@ export function formatFade(
     r("Asia", report.bySession.Asia),
     r("London", report.bySession.London),
     r("NY", report.bySession.NY),
+    "",
+    "How the trades played out (distances in typical 30m moves)",
+    ...GRADES.map((g) => {
+      const n = report.byGrade[g];
+      const share = report.all.n === 0 ? 0 : n / report.all.n;
+      return `  ${GRADE_LABEL[g].padEnd(34)} n=${String(n).padStart(5)}  ${pct(share).padStart(6)} of trades`;
+    }),
     "",
     "Controls",
     r(`${opts.target} moved, ${opts.lead} did NOT confirm`, report.ownOnly),
