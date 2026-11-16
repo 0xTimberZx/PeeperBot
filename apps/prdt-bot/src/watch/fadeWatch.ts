@@ -18,7 +18,7 @@ import { AlertDispatcher, type Alert } from "../alerts.js";
 import { DEFAULT_FADE_PARAMS, type FadeParams } from "../analysis/fade.js";
 import { wilsonLower } from "../analysis/leadLag.js";
 import type { Dir } from "../analysis/prdtJournal.js";
-import { FadeOutcomeLog, callKey, handleReplies, latestOutcomes, type TelegramInbox } from "./fadeReplies.js";
+import { FadeOutcomeLog, callKey, handleReplies, latestOutcomes, TelegramError, type TelegramInbox } from "./fadeReplies.js";
 import { FadeReviewLog, formatReviewMessage, reviewFadeCall } from "./fadeReview.js";
 
 export interface FadeSignal {
@@ -291,9 +291,15 @@ export class FadeWatcher {
       try {
         await this.checkReplies(Math.min(25, leftSec - 2));
       } catch (err) {
-        // e.g. 409 when a webhook is set on the bot: back off rather than flood the log.
-        console.error("[fadewatch] reading replies failed:", (err as Error).message);
-        await sleep(Math.min(60_000, t - Date.now()), () => this.running);
+        // The inbox already retried transient failures. If those still failed,
+        // try again shortly; a permanent one (e.g. 409, a webhook is set on the
+        // bot) gets a long back-off rather than flooding the log.
+        const transient = err instanceof TelegramError && err.transient;
+        console.error(
+          `[fadewatch] reading replies failed${transient ? " (will retry in 10s)" : ""}:`,
+          (err as Error).message
+        );
+        await sleep(Math.min(transient ? 10_000 : 60_000, t - Date.now()), () => this.running);
       }
     }
   }
