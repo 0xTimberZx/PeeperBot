@@ -242,29 +242,114 @@ export function handleReplies(
   return actions;
 }
 
+/**
+ * A Telegram call that failed. `transient` = worth retrying soon: the network
+ * dropped, the request timed out, Telegram rate-limited us (429) or had a
+ * server error (5xx). Not transient: a bad token (401) or a webhook set on the
+ * bot (409) — retrying those only floods the log.
+ */
+export class TelegramError extends Error {
+  constructor(message: string, readonly transient: boolean, readonly retryAfterSec?: number) {
+    super(message);
+    this.name = "TelegramError";
+  }
+}
+
+/** "fetch failed" hides the reason; surface the socket error code (ECONNRESET, ETIMEDOUT…). */
+function describeNetworkError(err: unknown): string {
+  const e = err as { name?: string; message?: string; cause?: { code?: string; message?: string } };
+  if (e.name === "TimeoutError" || e.name === "AbortError") return "timed out";
+  const cause = e.cause?.code ?? e.cause?.message;
+  return cause ? `${e.message ?? "fetch failed"} (${cause})` : (e.message ?? String(err));
+}
+
+export interface RetryPolicy {
+  /** Total tries per call, including the first. */
+  attempts: number;
+  /** Wait before retry k is baseDelayMs × 2^(k-1), unless Telegram says retry_after. */
+  baseDelayMs: number;
+  sleep: (ms: number) => Promise<void>;
+}
+
+export const DEFAULT_RETRY: RetryPolicy = {
+  attempts: 3,
+  baseDelayMs: 1000,
+  sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+};
+
 /** Thin Telegram Bot API client for reading replies and answering them. */
 export class TelegramInbox {
-  constructor(private readonly botToken: string, readonly chatId: string) {}
+  constructor(
+    private readonly botToken: string,
+    readonly chatId: string,
+    private readonly retry: RetryPolicy = DEFAULT_RETRY
+  ) {}
 
   private url(method: string): string {
     return `https://api.telegram.org/bot${this.botToken}/${method}`;
   }
 
+  /** One request, time-boxed, with failures classified. Never logs the token. */
+  private async callOnce<T>(method: string, payload: object, timeoutMs: number): Promise<T> {
+    let res: Response;
+    try {
+      res = await fetch(this.url(method), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+    } catch (err) {
+      // The usual culprit: Telegram closed an idle keep-alive socket and the
+      // next request went out on it. A fresh attempt opens a new connection.
+      throw new TelegramError(`telegram ${method}: ${describeNetworkError(err)}`, true);
+    }
+    let body: { ok?: boolean; result?: T; description?: string; parameters?: { retry_after?: number } } = {};
+    try {
+      body = (await res.json()) as typeof body;
+    } catch {
+      // non-JSON error page (e.g. a proxy 502): fall through on the status
+    }
+    if (!res.ok || body.ok === false) {
+      const transient = res.status === 429 || res.status >= 500;
+      const why = body.description ?? res.statusText;
+      throw new TelegramError(`telegram ${method} ${res.status} ${why}`.trim(), transient, body.parameters?.retry_after);
+    }
+    return body.result as T;
+  }
+
+  /** Retry transient failures with backoff; give up at once on permanent ones. */
+  private async call<T>(method: string, payload: object, timeoutMs: number): Promise<T> {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await this.callOnce<T>(method, payload, timeoutMs);
+      } catch (err) {
+        const e = err instanceof TelegramError ? err : new TelegramError(String(err), false);
+        if (!e.transient || attempt >= this.retry.attempts) throw e;
+        const backoff = this.retry.baseDelayMs * 2 ** (attempt - 1);
+        const wait = e.retryAfterSec !== undefined ? Math.min(30_000, e.retryAfterSec * 1000) : backoff;
+        await this.retry.sleep(wait);
+      }
+    }
+  }
+
   /**
    * Long-poll for new messages after `offset`. Returns them and the offset to
    * use next. `waitSec` > 0 holds the request open until something arrives.
+   * Unread messages stay queued at Telegram (offset only advances on success),
+   * so a failed poll delays replies — it never loses them.
    */
   async poll(offset: number, waitSec: number): Promise<{ messages: TgMessage[]; next: number }> {
-    const res = await fetch(this.url("getUpdates"), {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ offset, timeout: Math.max(0, Math.floor(waitSec)), allowed_updates: ["message"] }),
-    });
-    if (!res.ok) throw new Error(`telegram getUpdates ${res.status} ${res.statusText}`);
-    const body = (await res.json()) as { ok: boolean; result?: TgUpdate[] };
+    const timeout = Math.max(0, Math.floor(waitSec));
+    // Give the long poll its full hold plus slack before calling it dead.
+    const result = await this.call<TgUpdate[]>(
+      "getUpdates",
+      { offset, timeout, allowed_updates: ["message"] },
+      (timeout + 10) * 1000
+    );
     let next = offset;
     const messages: TgMessage[] = [];
-    for (const u of body.result ?? []) {
+    for (const u of result ?? []) {
       next = Math.max(next, u.update_id + 1);
       const msg = u.message;
       if (msg?.text === undefined) continue;
@@ -280,12 +365,11 @@ export class TelegramInbox {
   }
 
   async reply(replyTo: number, text: string): Promise<void> {
-    const res = await fetch(this.url("sendMessage"), {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ chat_id: this.chatId, text, reply_parameters: { message_id: replyTo, allow_sending_without_reply: true } }),
-    });
-    if (!res.ok) throw new Error(`telegram sendMessage ${res.status} ${res.statusText}`);
+    await this.call(
+      "sendMessage",
+      { chat_id: this.chatId, text, reply_parameters: { message_id: replyTo, allow_sending_without_reply: true } },
+      15_000
+    );
   }
 }
 

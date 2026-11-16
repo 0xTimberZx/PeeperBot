@@ -146,3 +146,85 @@ describe("TelegramInbox + FadeWatcher.checkReplies", () => {
     }
   });
 });
+
+describe("TelegramInbox retries", () => {
+  const ok = (result: unknown): Response => new Response(JSON.stringify({ ok: true, result }), { status: 200 });
+  const update = { update_id: 3, message: { message_id: 5, date: 1, text: "won", chat: { id: 42 } } };
+
+  async function setup(responses: (() => Response)[]) {
+    const { vi } = await import("vitest");
+    const { TelegramInbox } = await import("./fadeReplies.js");
+    let calls = 0;
+    vi.stubGlobal("fetch", async () => {
+      const next = responses[Math.min(calls, responses.length - 1)]!;
+      calls++;
+      return next();
+    });
+    const waits: number[] = [];
+    const inbox = new TelegramInbox("TOKEN", CHAT, {
+      attempts: 3,
+      baseDelayMs: 1000,
+      sleep: async (ms) => void waits.push(ms),
+    });
+    return { inbox, waits, calls: () => calls, done: () => vi.unstubAllGlobals() };
+  }
+
+  // What Node's fetch throws when Telegram drops a reused keep-alive socket.
+  const dropped = (): Response => {
+    throw Object.assign(new TypeError("fetch failed"), { cause: { code: "ECONNRESET" } });
+  };
+
+  it("retries a dropped connection and returns the messages", async () => {
+    const t = await setup([dropped, dropped, () => ok([update])]);
+    try {
+      const r = await t.inbox.poll(0, 25);
+      expect(r.messages).toHaveLength(1);
+      expect(r.next).toBe(4);
+      expect(t.waits).toEqual([1000, 2000]);
+    } finally {
+      t.done();
+    }
+  });
+
+  it("gives up after the last attempt and names the socket error", async () => {
+    const { TelegramError } = await import("./fadeReplies.js");
+    const t = await setup([dropped]);
+    try {
+      const err = await t.inbox.poll(0, 25).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(TelegramError);
+      expect((err as InstanceType<typeof TelegramError>).transient).toBe(true);
+      expect((err as Error).message).toContain("ECONNRESET");
+      expect((err as Error).message).not.toContain("TOKEN");
+      expect(t.calls()).toBe(3);
+    } finally {
+      t.done();
+    }
+  });
+
+  it("honours retry_after on a 429", async () => {
+    const limited = (): Response =>
+      new Response(JSON.stringify({ ok: false, description: "Too Many Requests", parameters: { retry_after: 4 } }), { status: 429 });
+    const t = await setup([limited, () => ok([])]);
+    try {
+      await t.inbox.poll(0, 0);
+      expect(t.waits).toEqual([4000]);
+    } finally {
+      t.done();
+    }
+  });
+
+  it("does not retry a permanent error like a 409 webhook conflict", async () => {
+    const conflict = (): Response =>
+      new Response(JSON.stringify({ ok: false, description: "Conflict: can't use getUpdates while webhook is active" }), { status: 409 });
+    const t = await setup([conflict]);
+    try {
+      const err = await t.inbox.poll(0, 25).catch((e: unknown) => e);
+      expect((err as { transient: boolean }).transient).toBe(false);
+      expect((err as Error).message).toContain("409");
+      expect(t.calls()).toBe(1);
+      expect(t.waits).toEqual([]);
+    } finally {
+      t.done();
+    }
+  });
+});
