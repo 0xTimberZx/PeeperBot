@@ -1,0 +1,84 @@
+name: Aave health
+
+# Pings Telegram before an Aave loan gets near liquidation. READ-ONLY: it reads
+# your account's health factor from the Aave v3 Pool over public RPC. It needs
+# only your PUBLIC wallet address — never a private key or seed phrase — and it
+# never signs or sends a transaction.
+#
+# Alerts: when health falls below warn (2.0) → danger (1.5) → critical (1.2),
+# a reminder every hour while below danger, once when it recovers, and once if
+# the RPC can't be read three runs in a row (silence is never "safe").
+#
+# Setup:
+#   Secret   AAVE_ADDRESS   your public wallet address. Stored as a SECRET so it
+#                           is masked in the logs of this public repo (it links
+#                           to your on-chain balances). Logs print 0x1234…abcd.
+#   Variable AAVE_CHAIN     ethereum | arbitrum | optimism | polygon | avalanche |
+#                           base — comma-separate several (default ethereum).
+#   Optional Variables AAVE_WARN_HF / AAVE_DANGER_HF / AAVE_CRITICAL_HF,
+#            AAVE_REMIND_MIN; optional Secret AAVE_RPC_URL (your own RPC).
+#   Telegram uses the same TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID secrets.
+# Without AAVE_ADDRESS the job skips cleanly.
+#
+# GitHub's scheduler runs late under load (5–15 min). For a tighter loop run
+# `npm run bot:aave -- --interval 2` on a machine that stays on.
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+    inputs:
+      test: { description: "Send a sample alert and exit", required: false }
+      status: { description: "Print current health and exit (no alerts)", required: false }
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aave-health
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Restore alert state
+        uses: actions/cache/restore@v4
+        with:
+          path: apps/prdt-bot/data/aave-health-state.json
+          key: aave-health-${{ github.run_id }}
+          restore-keys: |
+            aave-health-
+      - name: Install dependencies
+        run: npm ci
+      - name: Check health
+        env:
+          AAVE_ADDRESS: ${{ secrets.AAVE_ADDRESS }}
+          AAVE_RPC_URL: ${{ secrets.AAVE_RPC_URL }}
+          AAVE_CHAIN: ${{ vars.AAVE_CHAIN }}
+          AAVE_WARN_HF: ${{ vars.AAVE_WARN_HF }}
+          AAVE_DANGER_HF: ${{ vars.AAVE_DANGER_HF }}
+          AAVE_CRITICAL_HF: ${{ vars.AAVE_CRITICAL_HF }}
+          AAVE_REMIND_MIN: ${{ vars.AAVE_REMIND_MIN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          if [ "${{ github.event.inputs.test }}" = "true" ]; then
+            npm run aave --workspace=apps/prdt-bot -- --test
+          elif [ "${{ github.event.inputs.status }}" = "true" ]; then
+            npm run aave --workspace=apps/prdt-bot -- --status
+          else
+            npm run aave --workspace=apps/prdt-bot -- --once
+          fi
+      - name: Save alert state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: apps/prdt-bot/data/aave-health-state.json
+          key: aave-health-${{ github.run_id }}

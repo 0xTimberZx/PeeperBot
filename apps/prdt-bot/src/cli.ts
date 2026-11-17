@@ -38,6 +38,7 @@ import {
 import { analyzeLeadLag, formatLeadLag, DEFAULT_LEADLAG_PARAMS, type LeadLagParams } from "./analysis/leadLag.js";
 import { analyzeFade, formatFade, DEFAULT_FADE_PARAMS, type FadeParams, type FadeSide } from "./analysis/fade.js";
 import { FadeWatcher, FadeJournal, fadeWatchConfigFromEnv, scoreFadeCalls } from "./watch/fadeWatch.js";
+import { AaveHealthMonitor, aaveConfigFrom } from "./watch/aaveHealthRun.js";
 import { FadeOutcomeLog, TelegramInbox, callKey, formatRecord, latestOutcomes, yourRecord } from "./watch/fadeReplies.js";
 import { FadeReviewLog } from "./watch/fadeReview.js";
 import { GRADES, GRADE_LABEL } from "./analysis/callReview.js";
@@ -997,6 +998,36 @@ async function cmdLeadLag(flags: Map<string, string>): Promise<void> {
   }
 }
 
+async function cmdAave(flags: Map<string, string>): Promise<void> {
+  const cfg = loadConfig();
+  const dispatcher = buildDispatcher(cfg);
+  if (flags.get("test") === "true") {
+    await dispatcher.dispatch({
+      symbol: "AAVE-TEST", timeframeMin: 0, direction: "NONE", confidence: 0, entryPrice: 0,
+      reason: "TEST — this is what an Aave health alert looks like. Your position was not read.",
+      strategy: "aave-health", live: false, ts: Date.now(), kind: "info",
+    });
+    return;
+  }
+  const aave = aaveConfigFrom(flags);
+  if (aave === null) {
+    // Scheduled run with nothing armed yet: skip cleanly rather than fail the job.
+    console.log("[aave] not configured — set AAVE_ADDRESS (your PUBLIC wallet address) to arm. Skipping.");
+    return;
+  }
+  const monitor = new AaveHealthMonitor(aave, dispatcher);
+  if (flags.get("status") === "true") return monitor.status();
+  if (flags.get("once") === "true") {
+    await monitor.checkOnce();
+    return;
+  }
+  const shutdown = () => monitor.stop();
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
+  const forMin = flags.get("for");
+  await monitor.start(Number(flags.get("interval") ?? 5), forMin === undefined ? undefined : Number(forMin));
+}
+
 function tradesPath(flags: Map<string, string>): string {
   return flags.get("journal") ?? process.env.PRDT_TRADES_PATH ?? "./data/prdt-trades.jsonl";
 }
@@ -1296,6 +1327,9 @@ async function main(): Promise<void> {
     case "fadewatch":
       await cmdFadeWatch(flags);
       break;
+    case "aave":
+      await cmdAave(flags);
+      break;
     case "pivotfollow":
       await cmdPivotFollow(flags);
       break;
@@ -1348,6 +1382,8 @@ async function main(): Promise<void> {
           `  peeperbot fade      [--lead COREUSDT] [--target BTCUSDT,ETHUSDT] [--days 180] [--side dump|pump|both]\n` +
           `                     #   [--window 30] [--hold 30] [--lead-move 1.5] [--own-move 0.15] [--skip-days 0]\n` +
           `                     # backtest: lead + major dumped together → bet the major bounces\n` +
+          `  peeperbot aave     --address 0x… [--chain arbitrum,base] [--status | --once | --test] [--interval 5]\n` +
+          `                     # Aave health-factor alerts (read-only: public address, no keys)\n` +
           `  peeperbot fadewatch [--target BTCUSDT,ETHUSDT] [--for 350] [--max-late 120]\n` +
           `                     # live: ping Telegram at the 5m close when CORE + BTC/ETH dumped together (bet UP 30m).\n` +
           `                     # --test to ping your phone · --report to score past alerts · --once for one check\n` +

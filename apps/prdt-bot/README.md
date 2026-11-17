@@ -561,6 +561,34 @@ npm run bot:fadewatch -- --report   # score every past alert against price
   workflow; stop it by cancelling the running job. It uses the same
   `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` secrets as the other watchers.
 
+## Aave health monitor (`peeperbot aave`)
+
+Pings you before an Aave loan gets near liquidation. **Read-only:** it reads
+your account from the Aave v3 Pool over public RPC using your **public** wallet
+address. It never needs a private key or seed phrase and never sends a
+transaction. Never paste a key or seed phrase anywhere for this.
+
+```bash
+npm run bot:aave -- --address 0xYourPublicAddress --chain arbitrum --status   # print health now
+npm run bot:aave -- --address 0x… --chain arbitrum,base                       # watch every 5 min
+npm run bot:aave -- --test                                                    # sample Telegram alert
+# flags: --warn 2.0 --danger 1.5 --critical 1.2 --remind 60 --interval 5 --once
+#        --rpc URL --pool 0x… (an Aave fork, e.g. on another chain)
+```
+
+- **Health factor** = collateral × liquidation threshold ÷ debt. Below 1, Aave
+  liquidates. With stablecoin debt and BTC/ETH collateral, collateral can fall
+  about `1 − 1/HF` first: HF 2.0 ≈ 50%, 1.5 ≈ 33%, 1.2 ≈ 17%. Each alert says
+  that drop and how much debt to repay to get back to the warning line.
+- **Alerts** when health falls below warn → danger → critical, hourly while below
+  danger, once when it recovers, and once if the RPC can't be read 3 checks in a
+  row (silence is never "safe").
+- **Unattended:** `.github/workflows/aave-health.yml` checks every 10 minutes.
+  Add your address as the **secret** `AAVE_ADDRESS` (masked in logs; output only
+  ever shows `0x1234…abcd`) and the variable `AAVE_CHAIN`. Supported chains:
+  ethereum, arbitrum, optimism, polygon, avalanche, base. Actions → Aave health →
+  Run workflow with `status` prints your numbers; check they match the Aave app.
+
 ## Trade BTC/ETH off a CORE pivot (`peeperbot pivotfollow`)
 
 Tests one plan: CORE prints a swing pivot, you wait 30 minutes, then hold BTC or

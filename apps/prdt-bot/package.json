@@ -24,6 +24,7 @@
     "pivotfollow": "tsx src/cli.ts pivotfollow",
     "fade": "tsx src/cli.ts fade",
     "fadewatch": "tsx src/cli.ts fadewatch",
+    "aave": "tsx src/cli.ts aave",
     "log": "tsx src/cli.ts log",
     "autopsy": "tsx src/cli.ts autopsy",
     "follow": "tsx src/cli.ts follow",
