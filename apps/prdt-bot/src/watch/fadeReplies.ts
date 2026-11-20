@@ -131,16 +131,50 @@ export function latestOutcomes(log: readonly FadeOutcome[]): Map<string, ReplyOu
 export interface YourRecord {
   won: number;
   lost: number;
+  /** Includes `autoMissed`. */
   missed: number;
+  /** Missed because you never answered (see `withAutoMissed`). */
+  autoMissed: number;
   unanswered: number;
 }
 
-export function yourRecord(calls: readonly FadeCall[], answers: ReadonlyMap<string, ReplyOutcome>): YourRecord {
-  const r: YourRecord = { won: 0, lost: 0, missed: 0, unanswered: 0 };
+/** Minutes after a call settles with no reply before it counts as missed. */
+export const AUTO_MISS_AFTER_MIN = 120;
+
+/**
+ * No reply = you didn't take it. A call still unanswered `graceMin` minutes
+ * after it settled counts as missed — quietly: nothing is sent and nothing is
+ * written, so a reply that comes later still wins.
+ */
+export function withAutoMissed(
+  calls: readonly FadeCall[],
+  answers: ReadonlyMap<string, ReplyOutcome>,
+  now: number,
+  graceMin = AUTO_MISS_AFTER_MIN
+): { answers: Map<string, ReplyOutcome>; auto: Set<string> } {
+  const out = new Map(answers);
+  const auto = new Set<string>();
+  for (const c of calls) {
+    const k = callKey(c);
+    if (!out.has(k) && c.settleAt + graceMin * 60_000 <= now) {
+      out.set(k, "missed");
+      auto.add(k);
+    }
+  }
+  return { answers: out, auto };
+}
+
+export function yourRecord(
+  calls: readonly FadeCall[],
+  answers: ReadonlyMap<string, ReplyOutcome>,
+  auto: ReadonlySet<string> = new Set()
+): YourRecord {
+  const r: YourRecord = { won: 0, lost: 0, missed: 0, autoMissed: 0, unanswered: 0 };
   for (const c of calls) {
     const a = answers.get(callKey(c));
     if (a === undefined) r.unanswered++;
     else r[a]++;
+    if (a === "missed" && auto.has(callKey(c))) r.autoMissed++;
   }
   return r;
 }
@@ -148,7 +182,8 @@ export function yourRecord(calls: readonly FadeCall[], answers: ReadonlyMap<stri
 export function formatRecord(r: YourRecord): string {
   const taken = r.won + r.lost;
   const rate = taken === 0 ? "" : ` — ${((r.won / taken) * 100).toFixed(0)}% of the ${taken} you took`;
-  return `Your record: ${r.won} won · ${r.lost} lost · ${r.missed} missed${rate}`;
+  const assumed = r.autoMissed > 0 ? ` (${r.autoMissed} assumed: no reply)` : "";
+  return `Your record: ${r.won} won · ${r.lost} lost · ${r.missed} missed${assumed}${rate}`;
 }
 
 /** The parts of a Telegram update this needs. */
@@ -230,7 +265,8 @@ export function handleReplies(
     const before = latestOutcomes(log).get(callKey(call));
     const outcome: FadeOutcome = { ts: m.date * 1000, symbol: call.symbol, barClose: call.barClose, outcome: verdict, text: m.text, sourceMessageId: m.messageId };
     log.push(outcome);
-    const record = formatRecord(yourRecord(calls, latestOutcomes(log)));
+    const filled = withAutoMissed(calls, latestOutcomes(log), m.date * 1000);
+    const record = formatRecord(yourRecord(calls, filled.answers, filled.auto));
     const which = `${call.symbol} ${call.bet} from ${hhmm(call.ts)} UTC`;
     let head: string;
     if (verdict === "undo") head = before === undefined ? `Nothing to undo on ${which}.` : `Cleared ${LABEL[before]} on ${which}.`;

@@ -39,7 +39,9 @@ import { analyzeLeadLag, formatLeadLag, DEFAULT_LEADLAG_PARAMS, type LeadLagPara
 import { analyzeFade, formatFade, DEFAULT_FADE_PARAMS, type FadeParams, type FadeSide } from "./analysis/fade.js";
 import { FadeWatcher, FadeJournal, fadeWatchConfigFromEnv, scoreFadeCalls } from "./watch/fadeWatch.js";
 import { AaveHealthMonitor, aaveConfigFrom } from "./watch/aaveHealthRun.js";
-import { FadeOutcomeLog, TelegramInbox, callKey, formatRecord, latestOutcomes, yourRecord } from "./watch/fadeReplies.js";
+import { FadeOutcomeLog, TelegramInbox, callKey, formatRecord, latestOutcomes, withAutoMissed, yourRecord } from "./watch/fadeReplies.js";
+import { ImbalanceWatcher, imbalanceConfigFromEnv } from "./watch/imbalanceWatch.js";
+import { describeGap, describeStats, fmtPrice } from "./analysis/imbalance.js";
 import { FadeReviewLog } from "./watch/fadeReview.js";
 import { GRADES, GRADE_LABEL } from "./analysis/callReview.js";
 import { analyzePivotFollow, formatPivotFollow, DEFAULT_PIVOTFOLLOW_PARAMS, type PivotFollowParams } from "./analysis/pivotFollow.js";
@@ -822,9 +824,11 @@ async function cmdFadeWatch(flags: Map<string, string>): Promise<void> {
     }
     // What you reported back by replying to the alerts in Telegram.
     const answers = latestOutcomes(new FadeOutcomeLog(watchCfg.outcomesPath ?? "./data/fade-outcomes.jsonl").readAll());
-    const mine = yourRecord(calls, answers);
+    // No reply 2h after a call settled = you didn't take it (a later reply still wins).
+    const filled = withAutoMissed(calls, answers, Date.now(), watchCfg.autoMissAfterMin);
+    const mine = yourRecord(calls, filled.answers, filled.auto);
     if (calls.length > 0) {
-      console.log(`\n${formatRecord(mine)} · ${mine.unanswered} unanswered`);
+      console.log(`\n${formatRecord(mine)}${mine.unanswered > 0 ? ` · ${mine.unanswered} still open for a reply` : ""}`);
       const disagree = calls.filter((c) => {
         const said = answers.get(callKey(c));
         const price = score.byCall[callKey(c)];
@@ -852,7 +856,11 @@ async function cmdFadeWatch(flags: Map<string, string>): Promise<void> {
 
   const { telegramBotToken, telegramChatId } = cfg.alerts;
   const inbox = telegramBotToken && telegramChatId ? new TelegramInbox(telegramBotToken, telegramChatId) : null;
-  const watcher = new FadeWatcher(watchCfg, dispatcher, undefined, inbox);
+  // The imbalance watch shares the process: its once-a-day callout runs alongside,
+  // and its gap map explains any open call that starts going against you.
+  const imbalanceOff = process.env.IMBALANCE_OFF === "1" || flags.get("no-imbalance") === "true";
+  const imbalance = imbalanceOff ? null : new ImbalanceWatcher(imbalanceConfigFromEnv(), dispatcher);
+  const watcher = new FadeWatcher(watchCfg, dispatcher, undefined, inbox, imbalance);
 
   // --review: grade every settled call not reviewed yet, however old. Logs only, no messages.
   if (flags.get("review") === "true") {
@@ -864,10 +872,49 @@ async function cmdFadeWatch(flags: Map<string, string>): Promise<void> {
     await watcher.runOnce();
     return;
   }
-  process.on("SIGINT", () => watcher.stop());
-  process.on("SIGTERM", () => watcher.stop());
-  const forMin = flags.get("for");
-  await watcher.start(forMin === undefined ? undefined : Number(forMin));
+  const stopAll = () => {
+    watcher.stop();
+    imbalance?.stop();
+  };
+  process.on("SIGINT", stopAll);
+  process.on("SIGTERM", stopAll);
+  const forMin = flags.get("for") === undefined ? undefined : Number(flags.get("for"));
+  await Promise.all([watcher.start(forMin), imbalance?.start(forMin)]);
+}
+
+/** Imbalance callouts on their own: --status prints the live gap map, --once scans (24h cap applies). */
+async function cmdImbalance(flags: Map<string, string>): Promise<void> {
+  const cfg = loadConfig();
+  const dispatcher = buildDispatcher(cfg);
+  const icfg = imbalanceConfigFromEnv();
+  const target = flags.get("target");
+  if (target !== undefined) icfg.targets = target.toUpperCase().split(",").filter((x) => x.length > 0);
+  if (flags.get("test") === "true") {
+    await dispatcher.dispatch({
+      symbol: icfg.targets[0] ?? "BTCUSDT", timeframeMin: 240, direction: "NONE", confidence: 0, entryPrice: 0,
+      reason: "TEST — this is what an imbalance callout looks like. No imbalance is being called.",
+      strategy: "imbalance", live: false, ts: Date.now(), kind: "info",
+    });
+    return;
+  }
+  const w = new ImbalanceWatcher(icfg, dispatcher);
+  if (flags.get("status") === "true") {
+    const now = Date.now();
+    for (const symbol of icfg.targets) {
+      const ctx = await w.context(symbol, now);
+      if (ctx === null) continue;
+      console.log(`\n═══ ${symbol} · price ${fmtPrice(ctx.price)} · 4h move ${(((ctx.price - ctx.price4hAgo) / ctx.price4hAgo) * 100).toFixed(2)}% · 4h ATR ${fmtPrice(ctx.atr4h)} ═══`);
+      const open = ctx.states.filter((s) => !s.filled).sort((a, b) => Math.abs(a.near - ctx.price) - Math.abs(b.near - ctx.price));
+      if (open.length === 0) console.log("no unfilled 4h / daily imbalances in range");
+      for (const s of open.slice(0, 8)) {
+        console.log(`  ${describeGap(s)} · ${s.fresh ? "fresh" : "partly filled"} · near ${fmtPrice(s.near)} → end ${fmtPrice(s.far)} · ${(((s.near - ctx.price) / ctx.price) * 100).toFixed(2)}% away`);
+      }
+      for (const tf of ["4h", "1d"] as const) console.log("  " + describeStats(ctx.stats[tf], symbol));
+    }
+    return;
+  }
+  const text = await w.scan(Date.now());
+  console.log(text === null ? "[imbalance] nothing to call out (or the 24h cap is in force)" : `[imbalance] sent:\n${text}`);
 }
 
 /**
@@ -1330,6 +1377,9 @@ async function main(): Promise<void> {
     case "aave":
       await cmdAave(flags);
       break;
+    case "imbalance":
+      await cmdImbalance(flags);
+      break;
     case "pivotfollow":
       await cmdPivotFollow(flags);
       break;
@@ -1382,6 +1432,8 @@ async function main(): Promise<void> {
           `  peeperbot fade      [--lead COREUSDT] [--target BTCUSDT,ETHUSDT] [--days 180] [--side dump|pump|both]\n` +
           `                     #   [--window 30] [--hold 30] [--lead-move 1.5] [--own-move 0.15] [--skip-days 0]\n` +
           `                     # backtest: lead + major dumped together → bet the major bounces\n` +
+          `  peeperbot imbalance [--status | --once | --test] [--target BTCUSDT,ETHUSDT]\n` +
+          `                     # 4h/daily imbalance callout (max one per 24h; also runs inside fadewatch)\n` +
           `  peeperbot aave     --address 0x… [--chain arbitrum,base] [--status | --once | --test] [--interval 5]\n` +
           `                     # Aave health-factor alerts (read-only: public address, no keys)\n` +
           `  peeperbot fadewatch [--target BTCUSDT,ETHUSDT] [--for 350] [--max-late 120]\n` +

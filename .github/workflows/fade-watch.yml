@@ -23,7 +23,16 @@ name: Fade watch
 # played out — clean win, narrow loss, gave it back, or a complete blowout.
 #
 # Replies: answer an alert in Telegram with won / lost / missed (or a synonym,
-# ✅ / ❌) and the bot logs it and replies with your running record.
+# ✅ / ❌) and the bot logs it and replies with your running record. No reply
+# within 2h of the settle (FADE_AUTO_MISS_MIN) counts as missed, quietly.
+#
+# Against-warnings: if an open call moves FADE_AGAINST_PCT (0.3%) against the
+# bet, the bot replies under it once, naming the 4h/daily imbalance price is
+# heading into and where that imbalance ends. No daily cap.
+#
+# Imbalance callout: the same job scans BTC/ETH every 15 min and, at most once
+# per 24h (IMBALANCE_CAP_HOURS), calls out a fast move into a fresh 4h/daily
+# imbalance with its end level and historical odds. IMBALANCE_OFF=1 disables.
 #
 # State: the open-call latch, the alert journal and your replies live in apps/prdt-bot/data
 # and are carried between jobs by actions/cache. The journal is also uploaded as
@@ -71,6 +80,7 @@ jobs:
             apps/prdt-bot/data/fade-journal.jsonl
             apps/prdt-bot/data/fade-outcomes.jsonl
             apps/prdt-bot/data/fade-reviews.jsonl
+            apps/prdt-bot/data/imbalance-state.json
           key: fade-watch-${{ github.run_id }}
           restore-keys: |
             fade-watch-
@@ -96,6 +106,11 @@ jobs:
           FADE_OWN_MOVE_PCT: ${{ vars.FADE_OWN_MOVE_PCT }}
           FADE_HOLD_MIN: ${{ vars.FADE_HOLD_MIN }}
           FADE_MAX_LATE_SEC: ${{ vars.FADE_MAX_LATE_SEC }}
+          FADE_AUTO_MISS_MIN: ${{ vars.FADE_AUTO_MISS_MIN }}
+          FADE_AGAINST_PCT: ${{ vars.FADE_AGAINST_PCT }}
+          IMBALANCE_TARGETS: ${{ vars.IMBALANCE_TARGETS }}
+          IMBALANCE_CAP_HOURS: ${{ vars.IMBALANCE_CAP_HOURS }}
+          IMBALANCE_OFF: ${{ vars.IMBALANCE_OFF }}
         run: |
           if [ "${{ github.event.inputs.test }}" = "true" ]; then
             npm run fadewatch --workspace=apps/prdt-bot -- --test
@@ -119,6 +134,7 @@ jobs:
             apps/prdt-bot/data/fade-journal.jsonl
             apps/prdt-bot/data/fade-outcomes.jsonl
             apps/prdt-bot/data/fade-reviews.jsonl
+            apps/prdt-bot/data/imbalance-state.json
           key: fade-watch-${{ github.run_id }}
       - name: Upload journal
         if: always()
@@ -129,6 +145,7 @@ jobs:
             apps/prdt-bot/data/fade-journal.jsonl
             apps/prdt-bot/data/fade-outcomes.jsonl
             apps/prdt-bot/data/fade-reviews.jsonl
+            apps/prdt-bot/data/imbalance-state.json
           if-no-files-found: ignore
       # Last step on purpose: the successor queues behind this job and starts
       # seconds after it exits. Skipped for test/report runs and when cancelled.

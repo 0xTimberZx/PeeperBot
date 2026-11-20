@@ -532,7 +532,13 @@ npm run bot:fadewatch -- --report   # score every past alert against price
   `skip`, `late`, `no fill`, `didn't take`). A plain message with no reply goes
   to the newest alert you haven't answered; replying again changes your answer,
   and `undo` clears it. If a message reads two ways ("didn't win") it asks
-  instead of guessing. Replies go to `data/fade-outcomes.jsonl`, and `--report`
+  instead of guessing. **No reply = missed:** a call you haven't answered 2
+  hours after it settles counts as missed, quietly — nothing is sent or written,
+  and a later reply still wins (`FADE_AUTO_MISS_MIN`).
+- **Going against you:** once an open call is 0.3% against the bet
+  (`FADE_AGAINST_PCT`), the bot replies under the alert — once per call, no
+  daily cap — with the 4h or daily imbalance price is heading into and where
+  that imbalance ends, i.e. where the move most likely stalls if it does. Replies go to `data/fade-outcomes.jsonl`, and `--report`
   shows your record next to the price-scored one and lists where they differ.
 - **Review after settle**: a minute or two after each call settles, the bot
   replies under the alert with how it played out, from 1-minute candles: won or
@@ -588,6 +594,30 @@ npm run bot:aave -- --test                                                    # 
   ever shows `0x1234…abcd`) and the variable `AAVE_CHAIN`. Supported chains:
   ethereum, arbitrum, optimism, polygon, avalanche, base. Actions → Aave health →
   Run workflow with `status` prints your numbers; check they match the Aave app.
+
+### Imbalance callout (`peeperbot imbalance`)
+
+At most **once in any 24 hours**, a heads-up when BTC or ETH starts moving fast
+into a fresh 4h or daily imbalance (a fair-value gap: candle 1's high below
+candle 3's low, or its low above candle 3's high), with where the imbalance
+ends. It runs inside the fade watch job, scanning every 15 minutes.
+
+```bash
+npm run bot:imbalance -- --status   # live gap map near price + history odds
+npm run bot:imbalance -- --once     # one scan (24h cap applies)
+npm run bot:imbalance -- --test     # sample Telegram callout
+```
+
+- **Trigger:** price moved at least 1× the 4h ATR over the last 4 hours toward
+  an unfilled gap it has **not touched yet**, and is now inside it or just short
+  of its near edge. Daily gaps beat 4h ones; the same gap is never called twice.
+- **Prediction:** the end of the imbalance is the gap's far edge (full fill),
+  with the halfway point, and the next gap beyond it if the move runs through.
+- **Odds, not certainty:** each callout quotes that market's own history over
+  the past year: of past fast first-touches, how many reached halfway and how
+  many reached the end within 24h (4h gaps) or 3 days (daily gaps).
+- Env: `IMBALANCE_TARGETS`, `IMBALANCE_CAP_HOURS` (24), `IMBALANCE_PACE_ATR` (1.0),
+  `IMBALANCE_OFF=1` to switch it off.
 
 ## Trade BTC/ETH off a CORE pivot (`peeperbot pivotfollow`)
 
