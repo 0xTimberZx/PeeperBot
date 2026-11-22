@@ -95,7 +95,7 @@ describe("yourRecord", () => {
       { ts: 3, symbol: "BTCUSDT", barClose: 2, outcome: "missed", text: "" },
       { ts: 4, symbol: "BTCUSDT", barClose: 3, outcome: "lost", text: "" },
     ];
-    expect(yourRecord(calls, latestOutcomes(log))).toEqual({ won: 1, lost: 1, missed: 1, unanswered: 1 });
+    expect(yourRecord(calls, latestOutcomes(log))).toEqual({ won: 1, lost: 1, missed: 1, autoMissed: 0, unanswered: 1 });
   });
 });
 
@@ -126,7 +126,7 @@ describe("TelegramInbox + FadeWatcher.checkReplies", () => {
       const w = new FadeWatcher(
         { lead: "COREUSDT", targets: ["BTCUSDT"], interval: "5m", params: { windowBars: 6, holdBars: 6, leadMovePct: 0.015, ownMovePct: 0.0015, side: "dump" },
           maxLateSec: 120, wakeOffsetSec: 3, statePath: join(dir, "s.json"), journalPath: join(dir, "j.jsonl"),
-          outcomesPath: join(dir, "o.jsonl"), reviewsPath: null, backtestBlowoutRate: {}, backtest: {}, breakeven: 0.526 },
+          outcomesPath: join(dir, "o.jsonl"), reviewsPath: null, backtestBlowoutRate: {}, backtest: {}, breakeven: 0.526, shadowRules: [], shadowJournalPath: null },
         new AlertDispatcher([]),
         undefined,
         new TelegramInbox("TOKEN", CHAT)
@@ -226,5 +226,34 @@ describe("TelegramInbox retries", () => {
     } finally {
       t.done();
     }
+  });
+});
+
+describe("no reply = missed, quietly", () => {
+  const settled = call({ barClose: 10, settleAt: 2_800_000 });
+  const graceEnd = 2_800_000 + 120 * 60_000;
+
+  it("leaves a call open for a reply until 2h after it settles", async () => {
+    const { withAutoMissed } = await import("./fadeReplies.js");
+    expect(withAutoMissed([settled], new Map(), graceEnd - 1).auto.size).toBe(0);
+    const late = withAutoMissed([settled], new Map(), graceEnd);
+    expect(late.answers.get("BTCUSDT@10")).toBe("missed");
+    expect(late.auto.size).toBe(1);
+  });
+
+  it("never overrides an answer you gave, even a late one", async () => {
+    const { withAutoMissed } = await import("./fadeReplies.js");
+    const r = withAutoMissed([settled], new Map([["BTCUSDT@10", "won" as const]]), graceEnd + 1);
+    expect(r.answers.get("BTCUSDT@10")).toBe("won");
+    expect(r.auto.size).toBe(0);
+  });
+
+  it("counts assumed misses in the record and says so", async () => {
+    const { withAutoMissed, formatRecord } = await import("./fadeReplies.js");
+    const calls = [settled, call({ barClose: 11, settleAt: 2_800_000 })];
+    const f = withAutoMissed(calls, new Map([["BTCUSDT@11", "lost" as const]]), graceEnd);
+    const r = yourRecord(calls, f.answers, f.auto);
+    expect(r).toMatchObject({ lost: 1, missed: 1, autoMissed: 1, unanswered: 0 });
+    expect(formatRecord(r)).toContain("1 missed (1 assumed: no reply)");
   });
 });

@@ -20,6 +20,7 @@ import { wilsonLower } from "../analysis/leadLag.js";
 import type { Dir } from "../analysis/prdtJournal.js";
 import { FadeOutcomeLog, callKey, handleReplies, latestOutcomes, TelegramError, type TelegramInbox } from "./fadeReplies.js";
 import { FadeReviewLog, formatReviewMessage, reviewFadeCall } from "./fadeReview.js";
+import { describeGap, fmtPrice, gapAgainst, type GapState } from "../analysis/imbalance.js";
 
 export interface FadeSignal {
   /** Close time (ms) of the 5m bar that completed the setup = backtest entry. */
@@ -74,6 +75,8 @@ export interface FadeCall {
   ownPct: number;
   /** Telegram's id for the alert message, so a reply to it can be matched. */
   telegramMessageId?: number;
+  /** Set on shadow calls: the id of the rule that would have fired. */
+  rule?: string;
 }
 
 export class FadeJournal {
@@ -147,6 +150,20 @@ export async function scoreFadeCalls(
   return score;
 }
 
+/**
+ * A candidate rule tracked live without alerting: every setup is journaled and
+ * scored like a real call, but nothing is sent. It earns an alert only once its
+ * live record backs up the backtest.
+ */
+export interface ShadowRule {
+  id: string;
+  label: string;
+  lead: string;
+  params: FadeParams;
+  /** Backtest win rate per target, for the report. */
+  backtest: Record<string, number>;
+}
+
 export interface FadeWatchConfig {
   lead: string;
   targets: string[];
@@ -167,6 +184,18 @@ export interface FadeWatchConfig {
   /** Backtest win rate to quote in the alert, per target. */
   backtest: Record<string, number>;
   breakeven: number;
+  /** Minutes after settle with no reply before a call counts as missed. */
+  autoMissAfterMin: number;
+  /** Warn under an open call once it is this far (fraction) against the bet. */
+  againstPct: number;
+  /** Candidate rules logged without alerting. Empty = none. */
+  shadowRules: ShadowRule[];
+  shadowJournalPath: string | null;
+}
+
+/** What the fade watch needs from the imbalance watch to explain a call going against you. */
+export interface ImbalanceSource {
+  context(symbol: string, now?: number): Promise<{ states: GapState[]; atr4h: number } | null>;
 }
 
 interface FadeState {
@@ -176,6 +205,8 @@ interface FadeState {
   handled: Record<string, number>;
   /** Next Telegram update id to read, so replies are processed once. */
   tgOffset?: number;
+  /** Calls already warned about going against you (callKey → when). */
+  warned?: Record<string, number>;
 }
 
 type Fetch = (symbol: string, interval: Interval, limit: number, endTime?: number) => Promise<Candle[]>;
@@ -192,6 +223,7 @@ export class FadeWatcher {
   private readonly journal: FadeJournal | null;
   private readonly outcomes: FadeOutcomeLog | null;
   private readonly reviews: FadeReviewLog | null;
+  private readonly shadowJournal: FadeJournal | null;
 
   constructor(
     private readonly cfg: FadeWatchConfig,
@@ -199,11 +231,53 @@ export class FadeWatcher {
     private readonly fetch: Fetch = (symbol, interval, limit, endTime) =>
       fetchKlines({ symbol, interval, limit, ...(endTime === undefined ? {} : { endTime }) }),
     /** Reads your won / lost / missed replies. Null = replies are not read. */
-    private readonly inbox: TelegramInbox | null = null
+    private readonly inbox: TelegramInbox | null = null,
+    /** Gap map for "going against you" warnings. Null = warn without imbalance levels. */
+    private readonly imbalance: ImbalanceSource | null = null
   ) {
     this.journal = cfg.journalPath ? new FadeJournal(cfg.journalPath) : null;
     this.outcomes = cfg.outcomesPath ? new FadeOutcomeLog(cfg.outcomesPath) : null;
     this.reviews = cfg.reviewsPath ? new FadeReviewLog(cfg.reviewsPath) : null;
+    this.shadowJournal = cfg.shadowJournalPath ? new FadeJournal(cfg.shadowJournalPath) : null;
+  }
+
+  /**
+   * Evaluate the shadow rules on the bar that just closed and journal any setup.
+   * Never sends anything. Uses the same one-position-at-a-time and lateness
+   * rules as real alerts, so its record is comparable.
+   */
+  async evaluateShadow(now: number, targets: ReadonlyMap<string, readonly Candle[]>): Promise<number> {
+    if (this.shadowJournal === null || this.cfg.shadowRules.length === 0) return 0;
+    const expectedClose = Math.floor(now / this.barMs) * this.barMs - 1;
+    let logged = 0;
+    for (const rule of this.cfg.shadowRules) {
+      const lead = await this.fetch(rule.lead, this.cfg.interval, rule.params.windowBars + 4);
+      if (!lead.some((c) => c.closeTime === expectedClose)) {
+        console.log(`[fadewatch] shadow ${rule.id}: ${rule.lead} bar not printed yet — skipped this close`);
+        continue;
+      }
+      const holdMs = rule.params.holdBars * this.barMs;
+      for (const [symbol, candles] of targets) {
+        const sig = evaluateFadeSignal(lead, candles, rule.params, now);
+        if (sig === null) continue;
+        const key = `${rule.id}:${symbol}`;
+        if ((this.state.handled[key] ?? 0) >= sig.barClose) continue;
+        this.state.handled[key] = sig.barClose;
+        if (sig.barClose < (this.state.openUntil[key] ?? 0)) continue;
+        const lateSec = Math.max(0, Math.round((now - sig.barClose) / 1000));
+        if (lateSec > this.cfg.maxLateSec) continue;
+        this.state.openUntil[key] = sig.barClose + holdMs;
+        const alertPrice = candles[candles.length - 1]?.close ?? sig.signalClose;
+        this.shadowJournal.append({
+          ts: now, symbol, lead: rule.lead, bet: sig.bet, barClose: sig.barClose, lateSec, signalClose: sig.signalClose,
+          alertPrice, settleAt: now + holdMs, holdMin: Math.round(holdMs / 60_000), leadPct: sig.leadPct, ownPct: sig.ownPct, rule: rule.id,
+        });
+        logged++;
+        console.log(`[fadewatch] shadow ${rule.id} ${symbol}: setup logged, no alert — ${rule.lead} ${pct(sig.leadPct)}, ${symbol} ${pct(sig.ownPct)} → ${sig.bet} ${Math.round(holdMs / 60_000)}m`);
+      }
+    }
+    this.persist();
+    return logged;
   }
 
   /**
@@ -381,7 +455,24 @@ export class FadeWatcher {
         ...(telegramMessageId === undefined ? {} : { telegramMessageId }),
       });
     }
+    // Open calls going against you: one warning each, no daily cap.
+    try {
+      const latest: Record<string, number> = {};
+      this.cfg.targets.forEach((sym, k) => {
+        const last = targets[k]![targets[k]!.length - 1];
+        if (last !== undefined) latest[sym] = last.close;
+      });
+      await this.warnAgainst(now, latest);
+    } catch (err) {
+      console.error("[fadewatch] against-check failed:", (err as Error).message);
+    }
     this.persist();
+    // Shadow rules run after real alerts are out, and can never block them.
+    try {
+      await this.evaluateShadow(now, new Map(this.cfg.targets.map((s, k) => [s, targets[k]!])));
+    } catch (err) {
+      console.error("[fadewatch] shadow rules failed:", (err as Error).message);
+    }
     // Never let a review problem get in the way of the next alert.
     try {
       await this.reviewSettled(now);
@@ -391,11 +482,69 @@ export class FadeWatcher {
     return true;
   }
 
+  /**
+   * Warn once under any open call whose price has moved `againstPct` or more
+   * against the bet, naming the 4h / daily imbalance price is heading into and
+   * where it ends — the level the move most likely stalls at, if it does.
+   */
+  async warnAgainst(now: number, latest: Record<string, number>): Promise<number> {
+    if (this.journal === null || !(this.cfg.againstPct > 0)) return 0;
+    const warned = (this.state.warned ??= {});
+    // Forget warnings for calls settled more than a day ago.
+    for (const [k, t] of Object.entries(warned)) if (now - t > 86_400_000) delete warned[k];
+    const open = this.journal.readAll().filter((c) => c.ts <= now && now < c.settleAt && warned[callKey(c)] === undefined);
+    let sent = 0;
+    for (const call of open) {
+      const price = latest[call.symbol];
+      if (price === undefined || call.alertPrice <= 0) continue;
+      const against = call.bet === "UP" ? (call.alertPrice - price) / call.alertPrice : (price - call.alertPrice) / call.alertPrice;
+      if (against < this.cfg.againstPct) continue;
+      warned[callKey(call)] = now;
+      const heading = call.bet === "UP" ? "down" : "up";
+      const ctx = this.imbalance === null ? null : await this.imbalance.context(call.symbol, now);
+      const gap = ctx === null ? null : gapAgainst(ctx.states, price, heading, ctx.atr4h);
+      const minsLeft = Math.max(0, Math.round((call.settleAt - now) / 60_000));
+      const lines = [
+        `⚠️ ${call.symbol} ${call.bet} call going against you: ${pct(call.bet === "UP" ? -against : against)} since the alert ` +
+          `(${fmtPrice(call.alertPrice)} → ${fmtPrice(price)}), ${minsLeft} min left.`,
+      ];
+      if (gap !== null) {
+        const toEnd = (gap.far - price) / price;
+        lines.push(
+          `Heading ${heading} into the ${describeGap(gap)}. End of the imbalance: ${fmtPrice(gap.far)} (${pct(toEnd)} from here) — ` +
+            `where the move most likely stalls, if it does.`
+        );
+      } else if (ctx !== null) {
+        lines.push(`No unfilled 4h or daily imbalance within reach ${heading === "down" ? "below" : "above"} — no nearby level to expect it to stall at.`);
+      }
+      lines.push("Dry-run call: nothing was traded.");
+      const text = lines.join("\n");
+      console.log(`[fadewatch] ${call.symbol}: call @${hhmm(call.ts)} UTC is ${(against * 100).toFixed(2)}% against — warning sent`);
+      try {
+        if (this.inbox !== null && call.telegramMessageId !== undefined) await this.inbox.reply(call.telegramMessageId, text);
+        else
+          await this.dispatcher.dispatch({
+            symbol: call.symbol, timeframeMin: call.holdMin, direction: call.bet, confidence: 0, entryPrice: call.alertPrice,
+            reason: text, strategy: "fade-against", live: false, ts: now, kind: "info",
+          });
+        sent++;
+      } catch (err) {
+        console.error("[fadewatch] could not send an against-warning:", (err as Error).message);
+      }
+    }
+    return sent;
+  }
+
   private loadState(): void {
     if (!this.cfg.statePath) return;
     try {
       const s = JSON.parse(readFileSync(this.cfg.statePath, "utf8")) as Partial<FadeState>;
-      this.state = { openUntil: s.openUntil ?? {}, handled: s.handled ?? {}, ...(s.tgOffset === undefined ? {} : { tgOffset: s.tgOffset }) };
+      this.state = {
+        openUntil: s.openUntil ?? {},
+        handled: s.handled ?? {},
+        ...(s.tgOffset === undefined ? {} : { tgOffset: s.tgOffset }),
+        ...(s.warned === undefined ? {} : { warned: s.warned }),
+      };
     } catch {
       this.state = { openUntil: {}, handled: {} };
     }
@@ -416,7 +565,8 @@ export class FadeWatcher {
     console.log(
       `[fadewatch] ${mode} · ${this.cfg.lead} ≥ ${(p.leadMovePct * 100).toFixed(2)}% + ${this.cfg.targets.join("/")} ≥ ${(p.ownMovePct * 100).toFixed(2)}% ` +
         `(${p.side}) → ${p.holdBars * (this.barMs / 60_000)}m · max late ${this.cfg.maxLateSec}s · alerts=[${this.dispatcher.channelNames.join(",")}]` +
-        ` · replies=${this.inbox === null ? "off" : "on"}`
+        ` · replies=${this.inbox === null ? "off" : "on"}` +
+        ` · shadow=[${this.cfg.shadowRules.map((r) => r.id).join(",")}]`
     );
   }
 
@@ -459,6 +609,20 @@ export class FadeWatcher {
   }
 }
 
+/**
+ * ARB and the target dump together over 15m → bet the target bounces for 15m.
+ * Backtest, 540 days to 2026-11-10, OKX 5m: ETH 57.3% (56.3 / 55.7 / 59.4% by
+ * period, 641 trades), BTC 56.3% (56.2 / 54.0 / 58.2%, 595). Found by slicing
+ * after looking, so it is tracked in shadow before it may alert.
+ */
+export const ARB_15M_SHADOW: ShadowRule = {
+  id: "arb15",
+  label: "ARB 15m dump-fade",
+  lead: "ARBUSDT",
+  params: { windowBars: 3, holdBars: 3, leadMovePct: 0.015, ownMovePct: 0.0015, side: "dump" },
+  backtest: { ETHUSDT: 0.573, BTCUSDT: 0.563 },
+};
+
 /** Build the watcher config from env, with the backtested defaults. */
 export function fadeWatchConfigFromEnv(opts: { lead: string; breakeven: number }): FadeWatchConfig {
   const raw = (name: string): string | undefined => {
@@ -493,6 +657,11 @@ export function fadeWatchConfigFromEnv(opts: { lead: string; breakeven: number }
     // 540 days to 2026-11-10, OKX 5m candles, entry at the bar close.
     backtest: { BTCUSDT: 0.564, ETHUSDT: 0.573 },
     breakeven: opts.breakeven,
+    autoMissAfterMin: num("FADE_AUTO_MISS_MIN", 120),
+    againstPct: num("FADE_AGAINST_PCT", 0.3) / 100,
+    // FADE_SHADOW=off disables the shadow rules.
+    shadowRules: (raw("FADE_SHADOW") ?? "on").toLowerCase() === "off" ? [] : [ARB_15M_SHADOW],
+    shadowJournalPath: raw("FADE_SHADOW_PATH") ?? "./data/fade-shadow.jsonl",
   };
 }
 
