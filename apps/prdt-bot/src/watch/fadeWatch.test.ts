@@ -41,6 +41,8 @@ function watcher(series: Record<string, Candle[]>, over: Partial<FadeWatchConfig
     outcomesPath: null, reviewsPath: null, backtestBlowoutRate: {},
     backtest: { BTCUSDT: 0.564 },
     breakeven: 0.526,
+    shadowRules: [],
+    shadowJournalPath: null,
     ...over,
   };
   const w = new FadeWatcher(cfg, new AlertDispatcher([ch]), async (symbol) => series[symbol]!);
@@ -92,7 +94,7 @@ describe("FadeWatcher", () => {
     const ch = new Capture();
     let n = 3;
     const w = new FadeWatcher(
-      { lead: "COREUSDT", targets: ["BTCUSDT"], interval: "5m", params: P, maxLateSec: 120, wakeOffsetSec: 3, statePath: null, journalPath: null, outcomesPath: null, reviewsPath: null, backtestBlowoutRate: {}, backtest: {}, breakeven: 0.526 },
+      { lead: "COREUSDT", targets: ["BTCUSDT"], interval: "5m", params: P, maxLateSec: 120, wakeOffsetSec: 3, statePath: null, journalPath: null, outcomesPath: null, reviewsPath: null, backtestBlowoutRate: {}, backtest: {}, breakeven: 0.526, shadowRules: [], shadowJournalPath: null },
       new AlertDispatcher([ch]),
       async (symbol) => s[symbol as keyof typeof s].slice(0, n)
     );
@@ -145,7 +147,7 @@ describe("FadeWatcher replies", () => {
     const series = { COREUSDT: candles([100, 100, 98]), BTCUSDT: candles([100, 100, 99.5]) };
     const w = new FadeWatcher(
       { lead: "COREUSDT", targets: ["BTCUSDT"], interval: "5m", params: P, maxLateSec: 120, wakeOffsetSec: 3, statePath: null,
-        journalPath: join(dir, "j.jsonl"), outcomesPath: join(dir, "o.jsonl"), reviewsPath: null, backtestBlowoutRate: {}, backtest: {}, breakeven: 0.526 },
+        journalPath: join(dir, "j.jsonl"), outcomesPath: join(dir, "o.jsonl"), reviewsPath: null, backtestBlowoutRate: {}, backtest: {}, breakeven: 0.526, shadowRules: [], shadowJournalPath: null },
       new AlertDispatcher([new FakeTelegram()]),
       async (symbol) => series[symbol as keyof typeof series]
     );
@@ -186,7 +188,7 @@ describe("FadeWatcher reviews", () => {
     const w = new FadeWatcher(
       { lead: "COREUSDT", targets: ["BTCUSDT"], interval: "5m", params: { ...P, leadMovePct: 0.015 }, maxLateSec: 120, wakeOffsetSec: 3,
         statePath: null, journalPath: join(dir, "j.jsonl"), outcomesPath: join(dir, "o.jsonl"), reviewsPath: join(dir, "r.jsonl"),
-        backtestBlowoutRate: { BTCUSDT: 0.051 }, backtest: {}, breakeven: 0.526 },
+        backtestBlowoutRate: { BTCUSDT: 0.051 }, backtest: {}, breakeven: 0.526, shadowRules: [], shadowJournalPath: null },
       new AlertDispatcher([]),
       fetch,
       inbox as never
@@ -201,5 +203,59 @@ describe("FadeWatcher reviews", () => {
     expect(replies[0]!.text).toContain("CORE kept falling");
     expect(replies[0]!.text).toContain("Blowouts were 5.1% of backtest trades");
     expect(JSON.parse(readFileSync(join(dir, "r.jsonl"), "utf8").trim())).toMatchObject({ symbol: "BTCUSDT", grade: "blowout" });
+  });
+});
+
+describe("FadeWatcher shadow rules", () => {
+  it("journals a shadow setup without sending anything, once per open position", async () => {
+    const { mkdtempSync, readFileSync, existsSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const { tmpdir } = await import("node:os");
+    const dir = mkdtempSync(join(tmpdir(), "fadeshadow-"));
+    // CORE flat (no real alert); ARB and BTC dump together on bar 2, and again on bar 3.
+    let n = 3;
+    const all = { COREUSDT: candles([100, 100, 100, 100]), ARBUSDT: candles([1, 1, 0.98, 0.96]), BTCUSDT: candles([100, 100, 99.5, 99]) };
+    const ch = new Capture();
+    const rule = { id: "arb15", label: "ARB test", lead: "ARBUSDT", params: P, backtest: { BTCUSDT: 0.56 } };
+    const w = new FadeWatcher(
+      { lead: "COREUSDT", targets: ["BTCUSDT"], interval: "5m", params: P, maxLateSec: 120, wakeOffsetSec: 3, statePath: null,
+        journalPath: join(dir, "j.jsonl"), outcomesPath: null, reviewsPath: null, backtestBlowoutRate: {}, backtest: {}, breakeven: 0.526, autoMissAfterMin: 120, againstPct: 0.003,
+        shadowRules: [rule], shadowJournalPath: join(dir, "shadow.jsonl") },
+      new AlertDispatcher([ch]),
+      async (symbol) => all[symbol as keyof typeof all].slice(0, n)
+    );
+    expect(await w.tick(3 * BAR + 4000)).toBe(true);
+    n = 4;
+    await w.tick(4 * BAR + 4000); // still inside the first shadow position: not logged again
+    expect(ch.sent).toHaveLength(0); // nothing alerted
+    expect(existsSync(join(dir, "j.jsonl"))).toBe(false); // real journal untouched
+    const lines = readFileSync(join(dir, "shadow.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ symbol: "BTCUSDT", lead: "ARBUSDT", bet: "UP", rule: "arb15", holdMin: 10 });
+  });
+
+  it("does nothing when no shadow rules are configured", async () => {
+    const w = new FadeWatcher(
+      { lead: "COREUSDT", targets: ["BTCUSDT"], interval: "5m", params: P, maxLateSec: 120, wakeOffsetSec: 3, statePath: null,
+        journalPath: null, outcomesPath: null, reviewsPath: null, backtestBlowoutRate: {}, backtest: {}, breakeven: 0.526, autoMissAfterMin: 120, againstPct: 0.003,
+        shadowRules: [], shadowJournalPath: "/nonexistent/should-not-be-written.jsonl" },
+      new AlertDispatcher([]),
+      async () => { throw new Error("should not fetch"); }
+    );
+    expect(await w.evaluateShadow(3 * BAR + 4000, new Map())).toBe(0);
+  });
+});
+
+describe("ARB_15M_SHADOW", () => {
+  it("is the backtested rule: 15m window and hold, ARB ≥1.5% and target ≥0.15% dump", async () => {
+    const { ARB_15M_SHADOW, fadeWatchConfigFromEnv } = await import("./fadeWatch.js");
+    expect(ARB_15M_SHADOW.params).toEqual({ windowBars: 3, holdBars: 3, leadMovePct: 0.015, ownMovePct: 0.0015, side: "dump" });
+    expect(fadeWatchConfigFromEnv({ lead: "COREUSDT", breakeven: 0.526 }).shadowRules.map((r) => r.id)).toEqual(["arb15"]);
+    process.env["FADE_SHADOW"] = "off";
+    try {
+      expect(fadeWatchConfigFromEnv({ lead: "COREUSDT", breakeven: 0.526 }).shadowRules).toEqual([]);
+    } finally {
+      delete process.env["FADE_SHADOW"];
+    }
   });
 });

@@ -75,6 +75,8 @@ export interface FadeCall {
   ownPct: number;
   /** Telegram's id for the alert message, so a reply to it can be matched. */
   telegramMessageId?: number;
+  /** Set on shadow calls: the id of the rule that would have fired. */
+  rule?: string;
 }
 
 export class FadeJournal {
@@ -148,6 +150,20 @@ export async function scoreFadeCalls(
   return score;
 }
 
+/**
+ * A candidate rule tracked live without alerting: every setup is journaled and
+ * scored like a real call, but nothing is sent. It earns an alert only once its
+ * live record backs up the backtest.
+ */
+export interface ShadowRule {
+  id: string;
+  label: string;
+  lead: string;
+  params: FadeParams;
+  /** Backtest win rate per target, for the report. */
+  backtest: Record<string, number>;
+}
+
 export interface FadeWatchConfig {
   lead: string;
   targets: string[];
@@ -172,6 +188,9 @@ export interface FadeWatchConfig {
   autoMissAfterMin: number;
   /** Warn under an open call once it is this far (fraction) against the bet. */
   againstPct: number;
+  /** Candidate rules logged without alerting. Empty = none. */
+  shadowRules: ShadowRule[];
+  shadowJournalPath: string | null;
 }
 
 /** What the fade watch needs from the imbalance watch to explain a call going against you. */
@@ -204,6 +223,7 @@ export class FadeWatcher {
   private readonly journal: FadeJournal | null;
   private readonly outcomes: FadeOutcomeLog | null;
   private readonly reviews: FadeReviewLog | null;
+  private readonly shadowJournal: FadeJournal | null;
 
   constructor(
     private readonly cfg: FadeWatchConfig,
@@ -218,6 +238,46 @@ export class FadeWatcher {
     this.journal = cfg.journalPath ? new FadeJournal(cfg.journalPath) : null;
     this.outcomes = cfg.outcomesPath ? new FadeOutcomeLog(cfg.outcomesPath) : null;
     this.reviews = cfg.reviewsPath ? new FadeReviewLog(cfg.reviewsPath) : null;
+    this.shadowJournal = cfg.shadowJournalPath ? new FadeJournal(cfg.shadowJournalPath) : null;
+  }
+
+  /**
+   * Evaluate the shadow rules on the bar that just closed and journal any setup.
+   * Never sends anything. Uses the same one-position-at-a-time and lateness
+   * rules as real alerts, so its record is comparable.
+   */
+  async evaluateShadow(now: number, targets: ReadonlyMap<string, readonly Candle[]>): Promise<number> {
+    if (this.shadowJournal === null || this.cfg.shadowRules.length === 0) return 0;
+    const expectedClose = Math.floor(now / this.barMs) * this.barMs - 1;
+    let logged = 0;
+    for (const rule of this.cfg.shadowRules) {
+      const lead = await this.fetch(rule.lead, this.cfg.interval, rule.params.windowBars + 4);
+      if (!lead.some((c) => c.closeTime === expectedClose)) {
+        console.log(`[fadewatch] shadow ${rule.id}: ${rule.lead} bar not printed yet — skipped this close`);
+        continue;
+      }
+      const holdMs = rule.params.holdBars * this.barMs;
+      for (const [symbol, candles] of targets) {
+        const sig = evaluateFadeSignal(lead, candles, rule.params, now);
+        if (sig === null) continue;
+        const key = `${rule.id}:${symbol}`;
+        if ((this.state.handled[key] ?? 0) >= sig.barClose) continue;
+        this.state.handled[key] = sig.barClose;
+        if (sig.barClose < (this.state.openUntil[key] ?? 0)) continue;
+        const lateSec = Math.max(0, Math.round((now - sig.barClose) / 1000));
+        if (lateSec > this.cfg.maxLateSec) continue;
+        this.state.openUntil[key] = sig.barClose + holdMs;
+        const alertPrice = candles[candles.length - 1]?.close ?? sig.signalClose;
+        this.shadowJournal.append({
+          ts: now, symbol, lead: rule.lead, bet: sig.bet, barClose: sig.barClose, lateSec, signalClose: sig.signalClose,
+          alertPrice, settleAt: now + holdMs, holdMin: Math.round(holdMs / 60_000), leadPct: sig.leadPct, ownPct: sig.ownPct, rule: rule.id,
+        });
+        logged++;
+        console.log(`[fadewatch] shadow ${rule.id} ${symbol}: setup logged, no alert — ${rule.lead} ${pct(sig.leadPct)}, ${symbol} ${pct(sig.ownPct)} → ${sig.bet} ${Math.round(holdMs / 60_000)}m`);
+      }
+    }
+    this.persist();
+    return logged;
   }
 
   /**
@@ -407,6 +467,12 @@ export class FadeWatcher {
       console.error("[fadewatch] against-check failed:", (err as Error).message);
     }
     this.persist();
+    // Shadow rules run after real alerts are out, and can never block them.
+    try {
+      await this.evaluateShadow(now, new Map(this.cfg.targets.map((s, k) => [s, targets[k]!])));
+    } catch (err) {
+      console.error("[fadewatch] shadow rules failed:", (err as Error).message);
+    }
     // Never let a review problem get in the way of the next alert.
     try {
       await this.reviewSettled(now);
@@ -499,7 +565,8 @@ export class FadeWatcher {
     console.log(
       `[fadewatch] ${mode} · ${this.cfg.lead} ≥ ${(p.leadMovePct * 100).toFixed(2)}% + ${this.cfg.targets.join("/")} ≥ ${(p.ownMovePct * 100).toFixed(2)}% ` +
         `(${p.side}) → ${p.holdBars * (this.barMs / 60_000)}m · max late ${this.cfg.maxLateSec}s · alerts=[${this.dispatcher.channelNames.join(",")}]` +
-        ` · replies=${this.inbox === null ? "off" : "on"}`
+        ` · replies=${this.inbox === null ? "off" : "on"}` +
+        ` · shadow=[${this.cfg.shadowRules.map((r) => r.id).join(",")}]`
     );
   }
 
@@ -542,6 +609,20 @@ export class FadeWatcher {
   }
 }
 
+/**
+ * ARB and the target dump together over 15m → bet the target bounces for 15m.
+ * Backtest, 540 days to 2026-11-10, OKX 5m: ETH 57.3% (56.3 / 55.7 / 59.4% by
+ * period, 641 trades), BTC 56.3% (56.2 / 54.0 / 58.2%, 595). Found by slicing
+ * after looking, so it is tracked in shadow before it may alert.
+ */
+export const ARB_15M_SHADOW: ShadowRule = {
+  id: "arb15",
+  label: "ARB 15m dump-fade",
+  lead: "ARBUSDT",
+  params: { windowBars: 3, holdBars: 3, leadMovePct: 0.015, ownMovePct: 0.0015, side: "dump" },
+  backtest: { ETHUSDT: 0.573, BTCUSDT: 0.563 },
+};
+
 /** Build the watcher config from env, with the backtested defaults. */
 export function fadeWatchConfigFromEnv(opts: { lead: string; breakeven: number }): FadeWatchConfig {
   const raw = (name: string): string | undefined => {
@@ -578,6 +659,9 @@ export function fadeWatchConfigFromEnv(opts: { lead: string; breakeven: number }
     breakeven: opts.breakeven,
     autoMissAfterMin: num("FADE_AUTO_MISS_MIN", 120),
     againstPct: num("FADE_AGAINST_PCT", 0.3) / 100,
+    // FADE_SHADOW=off disables the shadow rules.
+    shadowRules: (raw("FADE_SHADOW") ?? "on").toLowerCase() === "off" ? [] : [ARB_15M_SHADOW],
+    shadowJournalPath: raw("FADE_SHADOW_PATH") ?? "./data/fade-shadow.jsonl",
   };
 }
 

@@ -74,7 +74,7 @@ describe("fade call going against you", () => {
     const cfg = {
       lead: "COREUSDT", targets: ["BTCUSDT"], interval: "5m", params: { windowBars: 2, holdBars: 2, leadMovePct: 0.015, ownMovePct: 0.0015, side: "dump" },
       maxLateSec: 120, wakeOffsetSec: 3, statePath: null, journalPath: join(dir, "j.jsonl"), outcomesPath: null, reviewsPath: null,
-      backtestBlowoutRate: {}, backtest: {}, breakeven: 0.526, autoMissAfterMin: 120, againstPct: 0.003,
+      backtestBlowoutRate: {}, backtest: {}, breakeven: 0.526, autoMissAfterMin: 120, againstPct: 0.003, shadowRules: [], shadowJournalPath: null,
     } as FadeWatchConfig;
     const ch = new Capture();
     const states = gapLow === null ? [] : [initialState({ tf: "4h", dir: "bull", low: gapLow, high: gapLow + 0.3, formedAt: 0 })];

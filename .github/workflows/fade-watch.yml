@@ -19,6 +19,10 @@ name: Fade watch
 # the workflow. After a failure it retries, but gives up after 3 in a row so a
 # broken build cannot loop forever.
 #
+# Shadow (Peeper 1.01): candidate rules are evaluated on every close and
+# journaled to data/fade-shadow.jsonl, scored by --report, never alerted.
+# Set the FADE_SHADOW variable to "off" to stop them.
+#
 # Reviews: when a call settles, the bot replies under the alert with how it
 # played out — clean win, narrow loss, gave it back, or a complete blowout.
 #
@@ -81,6 +85,7 @@ jobs:
             apps/prdt-bot/data/fade-outcomes.jsonl
             apps/prdt-bot/data/fade-reviews.jsonl
             apps/prdt-bot/data/imbalance-state.json
+            apps/prdt-bot/data/fade-shadow.jsonl
           key: fade-watch-${{ github.run_id }}
           restore-keys: |
             fade-watch-
@@ -111,6 +116,7 @@ jobs:
           IMBALANCE_TARGETS: ${{ vars.IMBALANCE_TARGETS }}
           IMBALANCE_CAP_HOURS: ${{ vars.IMBALANCE_CAP_HOURS }}
           IMBALANCE_OFF: ${{ vars.IMBALANCE_OFF }}
+          FADE_SHADOW: ${{ vars.FADE_SHADOW }}
         run: |
           if [ "${{ github.event.inputs.test }}" = "true" ]; then
             npm run fadewatch --workspace=apps/prdt-bot -- --test
@@ -135,6 +141,7 @@ jobs:
             apps/prdt-bot/data/fade-outcomes.jsonl
             apps/prdt-bot/data/fade-reviews.jsonl
             apps/prdt-bot/data/imbalance-state.json
+            apps/prdt-bot/data/fade-shadow.jsonl
           key: fade-watch-${{ github.run_id }}
       - name: Upload journal
         if: always()
@@ -146,6 +153,7 @@ jobs:
             apps/prdt-bot/data/fade-outcomes.jsonl
             apps/prdt-bot/data/fade-reviews.jsonl
             apps/prdt-bot/data/imbalance-state.json
+            apps/prdt-bot/data/fade-shadow.jsonl
           if-no-files-found: ignore
       # Last step on purpose: the successor queues behind this job and starts
       # seconds after it exits. Skipped for test/report runs and when cancelled.

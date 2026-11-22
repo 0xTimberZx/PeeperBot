@@ -806,12 +806,13 @@ async function cmdFadeWatch(flags: Map<string, string>): Promise<void> {
   // --report: how have the live alerts actually done?
   if (flags.get("report") === "true") {
     const calls = new FadeJournal(watchCfg.journalPath ?? "./data/fade-journal.jsonl").readAll();
-    const score = await scoreFadeCalls(calls, Date.now(), async (symbol, ts) => {
-      // Last 1m candle that closed at or before the settle time.
+    // Last 1m candle that closed at or before the settle time.
+    const priceAtSettle = async (symbol: string, ts: number): Promise<number | null> => {
       const page = await fetchKlines({ symbol, interval: "1m", limit: 3, endTime: ts });
       const done = page.filter((c) => c.closeTime < ts);
       return done[done.length - 1]?.close ?? null;
-    });
+    };
+    const score = await scoreFadeCalls(calls, Date.now(), priceAtSettle);
     const p = (x: number): string => `${(x * 100).toFixed(1)}%`;
     console.log(`\n═══════ Fade alerts — live record ═══════`);
     console.log(`${calls.length} alerts · ${score.settled} settled · ${score.pending} pending · breakeven ${p(breakeven)}`);
@@ -849,6 +850,20 @@ async function cmdFadeWatch(flags: Map<string, string>): Promise<void> {
       }
       const recent = reviews.slice(-10).filter((r) => r.grade === "blowout").length;
       if (recent >= 3) console.log(`⚠ ${recent} of the last ${Math.min(10, reviews.length)} calls were blowouts — far above the backtest's ~1 in 20.`);
+    }
+    // Shadow rules: logged and scored like real calls, never alerted.
+    const shadowCalls = new FadeJournal(watchCfg.shadowJournalPath ?? "./data/fade-shadow.jsonl").readAll();
+    for (const rule of watchCfg.shadowRules) {
+      const mine = shadowCalls.filter((c) => c.rule === rule.id);
+      const sc = await scoreFadeCalls(mine, Date.now(), priceAtSettle);
+      console.log(`\nShadow · ${rule.label} (${rule.id}) — logged, not alerted`);
+      console.log(`  ${mine.length} setups · ${sc.settled} settled · ${sc.pending} pending`);
+      if (sc.settled > 0) console.log(`  win rate ${p(sc.winRate)} (95% floor ${p(sc.wilsonLow)}) vs ${p(breakeven)} breakeven`);
+      for (const [sym, s] of Object.entries(sc.bySymbol)) {
+        const bt = rule.backtest[sym];
+        console.log(`  ${sym.padEnd(10)} n=${s.n}  win ${p(s.wins / s.n)}${bt === undefined ? "" : `  (backtest ${p(bt)})`}`);
+      }
+      console.log(sc.settled < 100 ? `  Judge it at 100+ settled setups (~3–5 weeks); until then it's too few to tell from luck.` : sc.wilsonLow > breakeven ? `  The 95% floor is above breakeven: candidate to promote to a real alert.` : `  Not proven yet: the 95% floor is still below breakeven.`);
     }
     console.log("═══════════════════════════════════\n");
     return;

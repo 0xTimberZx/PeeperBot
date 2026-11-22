@@ -560,6 +560,15 @@ npm run bot:fadewatch -- --report   # score every past alert against price
   go to `data/fade-reviews.jsonl`; `--report` shows the live grade mix and warns
   if 3 of the last 10 calls were blowouts. `--review` grades past calls without
   sending anything.
+- **Shadow signal — Peeper 1.01**: candidate rules run alongside the real
+  alert on every 5m close, are journaled to `data/fade-shadow.jsonl` and scored
+  in `--report`, but **never send anything**. A rule earns a real alert only
+  once its live record backs up the backtest (judge at 100+ settled setups).
+  The first one is `arb15`, the **ARB 15m dump-fade**: ARB down ≥ 1.5% and the
+  target down ≥ 0.15% over 15m → target UP for 15m. Backtest (540 days):
+  ETH 57.3%, BTC 56.3%, above breakeven in all three periods — but it was found
+  by slicing results after looking, which is why it starts in shadow.
+  `FADE_SHADOW=off` disables shadow rules.
 - **Unattended**: `.github/workflows/fade-watch.yml` runs the loop on GitHub
   Actions in back-to-back ~3h20m jobs (a cron tick every 5 minutes would arrive
   too late to be this trade). Each job starts its own successor, so it does not
