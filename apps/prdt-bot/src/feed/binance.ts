@@ -110,24 +110,40 @@ const OKX_BAR: Record<Interval, string> = {
   "4h": "4H",
   "1d": "1D",
 };
+/**
+ * Symbols OKX lists only as a USDT perpetual (e.g. MSTR, a stock). Learned on
+ * first use: a spot instId that does not exist (code 51001) is retried as
+ * `-SWAP` and remembered.
+ */
+const okxSwapOnly = new Set<string>();
 const okxSource: ExchangeSource = {
   name: "okx",
   maxLimit: 100,
   async fetchPage({ symbol, interval, endTime, limit }) {
     const { base, quote } = splitSymbol(symbol);
-    const instId = `${base}-${quote}`;
-    // `after` returns bars strictly older than the ts; +1 includes endTime's bar.
-    const params = new URLSearchParams({
-      instId,
-      bar: OKX_BAR[interval],
-      after: String(endTime + 1),
-      limit: String(Math.min(limit, 100)),
-    });
-    const json = (await getJson(`https://www.okx.com/api/v5/market/history-candles?${params}`)) as {
-      code: string;
-      msg?: string;
-      data: string[][];
+    const spot = `${base}-${quote}`;
+    const get = async (instId: string) => {
+      // `after` returns bars strictly older than the ts; +1 includes endTime's bar.
+      const params = new URLSearchParams({
+        instId,
+        bar: OKX_BAR[interval],
+        after: String(endTime + 1),
+        limit: String(Math.min(limit, 100)),
+      });
+      return (await getJson(`https://www.okx.com/api/v5/market/history-candles?${params}`)) as {
+        code: string;
+        msg?: string;
+        data: string[][];
+      };
     };
+    let json = await get(okxSwapOnly.has(spot) ? `${spot}-SWAP` : spot);
+    if (json.code === "51001" && !okxSwapOnly.has(spot)) {
+      const swap = await get(`${spot}-SWAP`);
+      if (swap.code === "0") {
+        okxSwapOnly.add(spot);
+        json = swap;
+      }
+    }
     if (json.code !== "0") throw new Error(`OKX code ${json.code} ${json.msg ?? ""}`.trim());
     const step = intervalMs(interval);
     // data rows: [ts, o, h, l, c, vol, volCcy, volCcyQuote, confirm], newest-first

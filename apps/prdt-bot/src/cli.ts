@@ -35,9 +35,9 @@ import {
   topVolumeNodes,
   type Side,
 } from "./analysis/entryAutopsy.js";
-import { analyzeLeadLag, formatLeadLag, DEFAULT_LEADLAG_PARAMS, type LeadLagParams } from "./analysis/leadLag.js";
+import { analyzeLeadLag, formatLeadLag, wilsonLower, DEFAULT_LEADLAG_PARAMS, type LeadLagParams } from "./analysis/leadLag.js";
 import { analyzeFade, formatFade, DEFAULT_FADE_PARAMS, type FadeParams, type FadeSide } from "./analysis/fade.js";
-import { FadeWatcher, FadeJournal, fadeWatchConfigFromEnv, scoreFadeCalls } from "./watch/fadeWatch.js";
+import { FadeWatcher, FadeJournal, confirmJoined, fadeWatchConfigFromEnv, scoreFadeCalls } from "./watch/fadeWatch.js";
 import { AaveHealthMonitor, aaveConfigFrom } from "./watch/aaveHealthRun.js";
 import { FadeOutcomeLog, TelegramInbox, callKey, formatRecord, latestOutcomes, withAutoMissed, yourRecord } from "./watch/fadeReplies.js";
 import { ImbalanceWatcher, imbalanceConfigFromEnv } from "./watch/imbalanceWatch.js";
@@ -868,6 +868,29 @@ async function cmdFadeWatch(flags: Map<string, string>): Promise<void> {
         console.log(`  ${sym.padEnd(10)} n=${s.n}  win ${p(s.wins / s.n)}${bt === undefined ? "" : `  (backtest ${p(bt)})`}`);
       }
       console.log(sc.settled < 100 ? `  Judge it at 100+ settled setups (~3–5 weeks); until then it's too few to tell from luck.` : sc.wilsonLow > breakeven ? `  The 95% floor is above breakeven: candidate to promote to a real alert.` : `  Not proven yet: the 95% floor is still below breakeven.`);
+    }
+    // Peeper 1.02: did the confirm symbol (MSTR) join the dump? Recorded, never filtered.
+    const confirm = watchCfg.confirm;
+    if (confirm !== null) {
+      const settled = calls.filter((c) => score.byCall[callKey(c)] !== undefined);
+      const group = (joined: boolean | null) => {
+        const g = settled.filter((c) => confirmJoined(c, confirm.joinPct) === joined);
+        const w = g.filter((c) => score.byCall[callKey(c)]).length;
+        return { n: g.length, w };
+      };
+      const yes = group(true), no = group(false), unknown = group(null);
+      const line = (label: string, g: { n: number; w: number }, bt: number) =>
+        `  ${label.padEnd(30)} n=${String(g.n).padStart(4)}  ${g.n > 0 ? `win ${p(g.w / g.n)} (95% floor ${p(wilsonLower(g.w, g.n))})` : "—"}  · backtest ${p(bt)}`;
+      const sym = confirm.symbol.replace(/USDT$/, "");
+      console.log(`\nPeeper 1.02 · ${sym} confirm — recorded on each alert, never filters`);
+      console.log(line(`${sym} joined (≥ ${(confirm.joinPct * 100).toFixed(1)}% same way)`, yes, confirm.backtest.joined));
+      console.log(line(`${sym} didn't join`, no, confirm.backtest.didnt));
+      if (unknown.n > 0) console.log(`  ${unknown.n} settled call(s) with no ${sym} reading (alerted before 1.02, or no data)`);
+      const known = yes.n + no.n;
+      if (known < 100) console.log(`  Judge it at 100+ settled calls with a reading (${known} so far); until then it's too few to tell from luck.`);
+      else if (no.n > 0 && yes.n > 0 && no.w / no.n < breakeven && yes.w / yes.n > breakeven)
+        console.log(`  Holding up: calls ${sym} didn't join are below breakeven — candidate to add a "skip" note to alerts.`);
+      else console.log(`  Not holding up live: the split doesn't separate winners from losers the way the backtest did.`);
     }
     // Confidence ladder: where the bot stands, and how the dip sandwiches did.
     let stage: Stage = "skeptical";

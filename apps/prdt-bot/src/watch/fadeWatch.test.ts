@@ -42,7 +42,7 @@ function watcher(series: Record<string, Candle[]>, over: Partial<FadeWatchConfig
     backtest: { BTCUSDT: 0.564 },
     breakeven: 0.526,
     shadowRules: [],
-    shadowJournalPath: null, confidence: { window: 50, minSettled: 50, upAt: 0.55, downBelow: 0.526 }, sandwich: { enabled: false, dipPct: 0.002, withinMin: 15 }, sandwichesPath: null,
+    shadowJournalPath: null, confidence: { window: 50, minSettled: 50, upAt: 0.55, downBelow: 0.526 }, sandwich: { enabled: false, dipPct: 0.002, withinMin: 15 }, sandwichesPath: null, confirm: null,
     autoMissAfterMin: 120, againstPct: 0,
     ...over,
   };
@@ -95,7 +95,7 @@ describe("FadeWatcher", () => {
     const ch = new Capture();
     let n = 3;
     const w = new FadeWatcher(
-      { lead: "COREUSDT", targets: ["BTCUSDT"], interval: "5m", params: P, maxLateSec: 120, wakeOffsetSec: 3, statePath: null, journalPath: null, outcomesPath: null, reviewsPath: null, backtestBlowoutRate: {}, backtest: {}, breakeven: 0.526, shadowRules: [], shadowJournalPath: null, confidence: { window: 50, minSettled: 50, upAt: 0.55, downBelow: 0.526 }, sandwich: { enabled: false, dipPct: 0.002, withinMin: 15 }, sandwichesPath: null },
+      { lead: "COREUSDT", targets: ["BTCUSDT"], interval: "5m", params: P, maxLateSec: 120, wakeOffsetSec: 3, statePath: null, journalPath: null, outcomesPath: null, reviewsPath: null, backtestBlowoutRate: {}, backtest: {}, breakeven: 0.526, shadowRules: [], shadowJournalPath: null, confidence: { window: 50, minSettled: 50, upAt: 0.55, downBelow: 0.526 }, sandwich: { enabled: false, dipPct: 0.002, withinMin: 15 }, sandwichesPath: null, confirm: null },
       new AlertDispatcher([ch]),
       async (symbol) => s[symbol as keyof typeof s].slice(0, n)
     );
@@ -148,7 +148,7 @@ describe("FadeWatcher replies", () => {
     const series = { COREUSDT: candles([100, 100, 98]), BTCUSDT: candles([100, 100, 99.5]) };
     const w = new FadeWatcher(
       { lead: "COREUSDT", targets: ["BTCUSDT"], interval: "5m", params: P, maxLateSec: 120, wakeOffsetSec: 3, statePath: null,
-        journalPath: join(dir, "j.jsonl"), outcomesPath: join(dir, "o.jsonl"), reviewsPath: null, backtestBlowoutRate: {}, backtest: {}, breakeven: 0.526, shadowRules: [], shadowJournalPath: null, confidence: { window: 50, minSettled: 50, upAt: 0.55, downBelow: 0.526 }, sandwich: { enabled: false, dipPct: 0.002, withinMin: 15 }, sandwichesPath: null },
+        journalPath: join(dir, "j.jsonl"), outcomesPath: join(dir, "o.jsonl"), reviewsPath: null, backtestBlowoutRate: {}, backtest: {}, breakeven: 0.526, shadowRules: [], shadowJournalPath: null, confidence: { window: 50, minSettled: 50, upAt: 0.55, downBelow: 0.526 }, sandwich: { enabled: false, dipPct: 0.002, withinMin: 15 }, sandwichesPath: null, confirm: null },
       new AlertDispatcher([new FakeTelegram()]),
       async (symbol) => series[symbol as keyof typeof series]
     );
@@ -189,7 +189,7 @@ describe("FadeWatcher reviews", () => {
     const w = new FadeWatcher(
       { lead: "COREUSDT", targets: ["BTCUSDT"], interval: "5m", params: { ...P, leadMovePct: 0.015 }, maxLateSec: 120, wakeOffsetSec: 3,
         statePath: null, journalPath: join(dir, "j.jsonl"), outcomesPath: join(dir, "o.jsonl"), reviewsPath: join(dir, "r.jsonl"),
-        backtestBlowoutRate: { BTCUSDT: 0.051 }, backtest: {}, breakeven: 0.526, shadowRules: [], shadowJournalPath: null, confidence: { window: 50, minSettled: 50, upAt: 0.55, downBelow: 0.526 }, sandwich: { enabled: false, dipPct: 0.002, withinMin: 15 }, sandwichesPath: null },
+        backtestBlowoutRate: { BTCUSDT: 0.051 }, backtest: {}, breakeven: 0.526, shadowRules: [], shadowJournalPath: null, confidence: { window: 50, minSettled: 50, upAt: 0.55, downBelow: 0.526 }, sandwich: { enabled: false, dipPct: 0.002, withinMin: 15 }, sandwichesPath: null, confirm: null },
       new AlertDispatcher([]),
       fetch,
       inbox as never
@@ -221,7 +221,7 @@ describe("FadeWatcher shadow rules", () => {
     const w = new FadeWatcher(
       { lead: "COREUSDT", targets: ["BTCUSDT"], interval: "5m", params: P, maxLateSec: 120, wakeOffsetSec: 3, statePath: null,
         journalPath: join(dir, "j.jsonl"), outcomesPath: null, reviewsPath: null, backtestBlowoutRate: {}, backtest: {}, breakeven: 0.526, autoMissAfterMin: 120, againstPct: 0.003,
-        shadowRules: [rule], shadowJournalPath: join(dir, "shadow.jsonl"), confidence: { window: 50, minSettled: 50, upAt: 0.55, downBelow: 0.526 }, sandwich: { enabled: false, dipPct: 0.002, withinMin: 15 }, sandwichesPath: null },
+        shadowRules: [rule], shadowJournalPath: join(dir, "shadow.jsonl"), confidence: { window: 50, minSettled: 50, upAt: 0.55, downBelow: 0.526 }, sandwich: { enabled: false, dipPct: 0.002, withinMin: 15 }, sandwichesPath: null, confirm: null },
       new AlertDispatcher([ch]),
       async (symbol) => all[symbol as keyof typeof all].slice(0, n)
     );
@@ -239,7 +239,7 @@ describe("FadeWatcher shadow rules", () => {
     const w = new FadeWatcher(
       { lead: "COREUSDT", targets: ["BTCUSDT"], interval: "5m", params: P, maxLateSec: 120, wakeOffsetSec: 3, statePath: null,
         journalPath: null, outcomesPath: null, reviewsPath: null, backtestBlowoutRate: {}, backtest: {}, breakeven: 0.526, autoMissAfterMin: 120, againstPct: 0.003,
-        shadowRules: [], shadowJournalPath: "/nonexistent/should-not-be-written.jsonl", confidence: { window: 50, minSettled: 50, upAt: 0.55, downBelow: 0.526 }, sandwich: { enabled: false, dipPct: 0.002, withinMin: 15 }, sandwichesPath: null },
+        shadowRules: [], shadowJournalPath: "/nonexistent/should-not-be-written.jsonl", confidence: { window: 50, minSettled: 50, upAt: 0.55, downBelow: 0.526 }, sandwich: { enabled: false, dipPct: 0.002, withinMin: 15 }, sandwichesPath: null, confirm: null },
       new AlertDispatcher([]),
       async () => { throw new Error("should not fetch"); }
     );
@@ -289,7 +289,7 @@ describe("FadeWatcher confidence and the dip sandwich", () => {
         journalPath: join(dir, "j.jsonl"), outcomesPath: null, reviewsPath: join(dir, "r.jsonl"), backtestBlowoutRate: {}, backtest: {}, breakeven: 0.526,
         autoMissAfterMin: 120, againstPct: 0, shadowRules: [], shadowJournalPath: null,
         confidence: { window: 50, minSettled: 50, upAt: 0.55, downBelow: 0.526 }, sandwich: { enabled: true, dipPct: 0.002, withinMin: 15 },
-        sandwichesPath: join(dir, "sw.jsonl") },
+        sandwichesPath: join(dir, "sw.jsonl"), confirm: null },
       new AlertDispatcher([ch]),
       async (_s, interval) => (interval === "1m" ? [{ openTime: 0, open: price, high: price, low: price, close: price, volume: 1, closeTime: 1 }] : [])
     );
@@ -339,5 +339,60 @@ describe("FadeWatcher confidence and the dip sandwich", () => {
     const { w: w2, sent } = watcher({ COREUSDT: candles([100, 100, 98]), BTCUSDT: candles([100, 100, 99.5]) });
     await w2.tick(3 * BAR + 4000);
     expect(sent[0]!.reason).toContain("Mode: SKEPTICAL — single bet only (0 of 50 calls settled");
+  });
+});
+
+describe("Peeper 1.02 — MSTR confirm", () => {
+  it("measures the confirm symbol over the signal's window, by bar time", async () => {
+    const { confirmMove } = await import("./fadeWatch.js");
+    const m = candles([200, 100, 99, 98.5]);
+    // Window of 2 bars ending at bar 3's close: 98.5 / 100 − 1.
+    expect(confirmMove(m, 4 * BAR - 1, 2, BAR)).toBeCloseTo(-0.015, 10);
+    expect(confirmMove(m, 5 * BAR - 1, 2, BAR)).toBeNull(); // end bar missing
+    expect(confirmMove(null, 4 * BAR - 1, 2, BAR)).toBeNull();
+  });
+
+  it("classifies joined / didn't / unknown by the bet's direction", async () => {
+    const { confirmJoined } = await import("./fadeWatch.js");
+    expect(confirmJoined({ bet: "UP", confirm: { symbol: "MSTRUSDT", pct: -0.004 } }, 0.003)).toBe(true);
+    expect(confirmJoined({ bet: "UP", confirm: { symbol: "MSTRUSDT", pct: -0.002 } }, 0.003)).toBe(false);
+    expect(confirmJoined({ bet: "UP", confirm: { symbol: "MSTRUSDT", pct: 0.01 } }, 0.003)).toBe(false);
+    expect(confirmJoined({ bet: "DOWN", confirm: { symbol: "MSTRUSDT", pct: 0.004 } }, 0.003)).toBe(true);
+    expect(confirmJoined({ bet: "UP", confirm: { symbol: "MSTRUSDT", pct: null } }, 0.003)).toBeNull();
+    expect(confirmJoined({ bet: "UP" }, 0.003)).toBeNull();
+  });
+
+  it("records MSTR's move on the alert without changing the alert", async () => {
+    const { mkdtempSync, readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const { tmpdir } = await import("node:os");
+    const { MSTR_CONFIRM } = await import("./fadeWatch.js");
+    const dir = mkdtempSync(join(tmpdir(), "fadeconfirm-"));
+    const series = { COREUSDT: candles([100, 100, 98]), BTCUSDT: candles([100, 100, 99.5]), MSTRUSDT: candles([80, 80, 79]) };
+    const { w, sent } = watcher(series, { journalPath: join(dir, "j.jsonl"), confirm: MSTR_CONFIRM });
+    await w.tick(3 * BAR + 4000);
+    expect(sent).toHaveLength(1);
+    const call = JSON.parse(readFileSync(join(dir, "j.jsonl"), "utf8").trim());
+    expect(call.confirm.symbol).toBe("MSTRUSDT");
+    expect(call.confirm.pct).toBeCloseTo(-0.0125, 10);
+    expect(sent[0]!.reason).not.toContain("MSTR"); // recorded only: the alert is unchanged
+  });
+
+  it("still alerts (and records null) when the confirm fetch fails", async () => {
+    const { mkdtempSync, readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const { tmpdir } = await import("node:os");
+    const { MSTR_CONFIRM } = await import("./fadeWatch.js");
+    const dir = mkdtempSync(join(tmpdir(), "fadeconfirm-"));
+    const series: Record<string, Candle[]> = { COREUSDT: candles([100, 100, 98]), BTCUSDT: candles([100, 100, 99.5]) };
+    const ch = new Capture();
+    const cfg = { ...watcher(series).w["cfg" as never] as object, journalPath: join(dir, "j.jsonl"), confirm: MSTR_CONFIRM } as FadeWatchConfig;
+    const w = new FadeWatcher(cfg, new AlertDispatcher([ch]), async (symbol) => {
+      if (symbol === "MSTRUSDT") throw new Error("feed down");
+      return series[symbol]!;
+    });
+    expect(await w.tick(3 * BAR + 4000)).toBe(true);
+    expect(ch.sent).toHaveLength(1);
+    expect(JSON.parse(readFileSync(join(dir, "j.jsonl"), "utf8").trim()).confirm).toEqual({ symbol: "MSTRUSDT", pct: null });
   });
 });
