@@ -569,6 +569,23 @@ npm run bot:fadewatch -- --report   # score every past alert against price
   ETH 57.3%, BTC 56.3%, above breakeven in all three periods — but it was found
   by slicing results after looking, which is why it starts in shadow.
   `FADE_SHADOW=off` disables shadow rules.
+- **Confidence ladder + dip sandwich**: the bot starts **skeptical** — single
+  bets only. It turns **confident** once 50 calls have settled and the last 50
+  won 55% or more, and drops back to skeptical if the last 50 fall below the
+  52.6% breakeven. Every alert says which mode it is in and why; every change
+  of mode sends a message explaining it. While confident, if an open call goes
+  0.2% against you within its first 15 minutes, the bot replies under it with a
+  **sandwich**: add a second bet now and set it to settle at the same time as
+  the first. A partial recovery then ends as a split (−0.1 of a stake) instead
+  of a full loss (−1); if price keeps going, both lose (−2). Backtest: the
+  second bet won 57% over 540 days (checked the way the bot can act on it —
+  once a minute, at the current price — it won 62% over the last 180 days);
+  both lost about 40% of the times it fired. Why not streaks: a win did not
+  make the next win likelier (57.3% after a win, 56.4% after a loss). Setups
+  are logged to `data/fade-sandwiches.jsonl` even while skeptical, and
+  `--report` scores them. `FADE_SANDWICH=off` disables them;
+  `FADE_SANDWICH_DIP_PCT`, `FADE_SANDWICH_WITHIN_MIN`, `FADE_CONFIDENCE_WINDOW`
+  and `FADE_CONFIDENCE_UP_PCT` tune them.
 - **Unattended**: `.github/workflows/fade-watch.yml` runs the loop on GitHub
   Actions in back-to-back ~3h20m jobs (a cron tick every 5 minutes would arrive
   too late to be this trade). Each job starts its own successor, so it does not

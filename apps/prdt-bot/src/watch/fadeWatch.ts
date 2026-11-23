@@ -21,6 +21,10 @@ import type { Dir } from "../analysis/prdtJournal.js";
 import { FadeOutcomeLog, callKey, handleReplies, latestOutcomes, TelegramError, type TelegramInbox } from "./fadeReplies.js";
 import { FadeReviewLog, formatReviewMessage, reviewFadeCall } from "./fadeReview.js";
 import { describeGap, fmtPrice, gapAgainst, type GapState } from "../analysis/imbalance.js";
+import {
+  readStage, SandwichLog, sandwichMessage, stageChangeMessage, stageLine,
+  type ConfidenceParams, type SandwichParams, type SandwichRecord, type Stage, type StageReading,
+} from "./confidence.js";
 
 export interface FadeSignal {
   /** Close time (ms) of the 5m bar that completed the setup = backtest entry. */
@@ -191,6 +195,11 @@ export interface FadeWatchConfig {
   /** Candidate rules logged without alerting. Empty = none. */
   shadowRules: ShadowRule[];
   shadowJournalPath: string | null;
+  /** When the bot earns (and loses) confidence, judged on its own settled calls. */
+  confidence: ConfidenceParams;
+  /** The dip sandwich: alerted only while confident, logged always. */
+  sandwich: SandwichParams;
+  sandwichesPath: string | null;
 }
 
 /** What the fade watch needs from the imbalance watch to explain a call going against you. */
@@ -207,9 +216,17 @@ interface FadeState {
   tgOffset?: number;
   /** Calls already warned about going against you (callKey → when). */
   warned?: Record<string, number>;
+  /** Confidence stage, and since when. Absent = skeptical. */
+  stage?: Stage;
+  stageSince?: number;
+  /** Calls whose sandwich already triggered (callKey → when). */
+  sandwiched?: Record<string, number>;
 }
 
 type Fetch = (symbol: string, interval: Interval, limit: number, endTime?: number) => Promise<Candle[]>;
+
+/** How often open calls are checked for a sandwich. */
+const SANDWICH_CHECK_MS = 60_000;
 
 /** Calls that settled longer ago than this are not reviewed by the live loop (use --review). */
 const REVIEW_MAX_AGE_MS = 6 * 3_600_000;
@@ -224,6 +241,8 @@ export class FadeWatcher {
   private readonly outcomes: FadeOutcomeLog | null;
   private readonly reviews: FadeReviewLog | null;
   private readonly shadowJournal: FadeJournal | null;
+  private readonly sandwiches: SandwichLog | null;
+  private nextSandwichCheck = 0;
 
   constructor(
     private readonly cfg: FadeWatchConfig,
@@ -239,6 +258,111 @@ export class FadeWatcher {
     this.outcomes = cfg.outcomesPath ? new FadeOutcomeLog(cfg.outcomesPath) : null;
     this.reviews = cfg.reviewsPath ? new FadeReviewLog(cfg.reviewsPath) : null;
     this.shadowJournal = cfg.shadowJournalPath ? new FadeJournal(cfg.shadowJournalPath) : null;
+    this.sandwiches = cfg.sandwichesPath ? new SandwichLog(cfg.sandwichesPath) : null;
+  }
+
+  /** Settled results, oldest first, from the post-settle reviews (a win = finished in the bet's favour). */
+  settledResults(): boolean[] {
+    if (this.reviews === null) return [];
+    return this.reviews
+      .readAll()
+      .slice()
+      .sort((a, b) => a.alertTs - b.alertTs)
+      .map((r) => r.finalPct > 0);
+  }
+
+  /** Where the bot stands now, without changing anything. */
+  confidence(): StageReading {
+    return readStage(this.state.stage ?? "skeptical", this.settledResults(), this.cfg.confidence);
+  }
+
+  /** Re-read the record; on a stage change, persist it and say why. */
+  async updateStage(now: number): Promise<StageReading> {
+    const prev = this.state.stage ?? "skeptical";
+    const r = this.confidence();
+    if (r.stage === prev) return r;
+    this.state.stage = r.stage;
+    this.state.stageSince = now;
+    this.persist();
+    const text = stageChangeMessage(prev, r, this.cfg.confidence);
+    console.log(`[fadewatch] stage ${prev} → ${r.stage} (last ${this.cfg.confidence.window}: ${r.wins} won)`);
+    try {
+      await this.dispatcher.dispatch({
+        symbol: this.cfg.targets.join("/"), timeframeMin: Math.round((this.cfg.params.holdBars * this.barMs) / 60_000), direction: "UP",
+        confidence: r.rate ?? 0, entryPrice: 0, reason: text, strategy: "fade-confidence", live: false, ts: now, kind: "info",
+      });
+    } catch (err) {
+      console.error("[fadewatch] could not send the stage change:", (err as Error).message);
+    }
+    return r;
+  }
+
+  /**
+   * The dip sandwich: for each open call in its first `withinMin` minutes whose
+   * price is now `dipPct` or more against the bet, log a second bet at the
+   * current price that settles with the first. Sent only while confident;
+   * logged while skeptical so the record builds either way. Once per call.
+   */
+  async checkSandwiches(now: number): Promise<number> {
+    const sw = this.cfg.sandwich;
+    if (this.journal === null || !sw.enabled || !(sw.dipPct > 0)) return 0;
+    const done = (this.state.sandwiched ??= {});
+    for (const [k, t] of Object.entries(done)) if (now - t > 86_400_000) delete done[k];
+    const candidates = this.journal
+      .readAll()
+      .filter((c) => c.ts <= now && now - c.ts <= sw.withinMin * 60_000 && now < c.settleAt && done[callKey(c)] === undefined && c.alertPrice > 0);
+    if (candidates.length === 0) return 0;
+    const stage = this.state.stage ?? "skeptical";
+    let triggered = 0;
+    const prices = new Map<string, number | null>();
+    for (const call of candidates) {
+      if (!prices.has(call.symbol)) {
+        const cs = await this.fetch(call.symbol, "1m", 2);
+        prices.set(call.symbol, cs[cs.length - 1]?.close ?? null);
+      }
+      const price = prices.get(call.symbol);
+      if (price === null || price === undefined) continue;
+      const against = call.bet === "UP" ? (call.alertPrice - price) / call.alertPrice : (price - call.alertPrice) / call.alertPrice;
+      if (against < sw.dipPct) continue;
+      done[callKey(call)] = now;
+      triggered++;
+      const send = stage === "confident";
+      const rec: SandwichRecord = {
+        ts: now, symbol: call.symbol, barClose: call.barClose, bet: call.bet, firstEntry: call.alertPrice, strike: price,
+        settleAt: call.settleAt, minutesLeft: Math.max(1, Math.round((call.settleAt - now) / 60_000)), stage, sent: send,
+      };
+      this.sandwiches?.append(rec);
+      this.persist();
+      if (!send) {
+        console.log(`[fadewatch] ${call.symbol}: sandwich setup (${(against * 100).toFixed(2)}% against) logged — skeptical, not sent`);
+        continue;
+      }
+      console.log(`[fadewatch] ${call.symbol}: sandwich setup (${(against * 100).toFixed(2)}% against) — alert sent`);
+      const text = sandwichMessage(rec, { pay: 1 / this.cfg.breakeven });
+      try {
+        if (this.inbox !== null && call.telegramMessageId !== undefined) await this.inbox.reply(call.telegramMessageId, text);
+        else
+          await this.dispatcher.dispatch({
+            symbol: call.symbol, timeframeMin: rec.minutesLeft, direction: call.bet, confidence: 0, entryPrice: price,
+            reason: text, strategy: "fade-sandwich", live: false, ts: now, kind: "info",
+          });
+      } catch (err) {
+        console.error("[fadewatch] could not send a sandwich alert:", (err as Error).message);
+      }
+    }
+    return triggered;
+  }
+
+  /** Run the sandwich check if a minute has passed since the last one. Never throws. */
+  private async maybeCheckSandwiches(): Promise<void> {
+    const now = Date.now();
+    if (now < this.nextSandwichCheck) return;
+    this.nextSandwichCheck = now + SANDWICH_CHECK_MS;
+    try {
+      await this.checkSandwiches(now);
+    } catch (err) {
+      console.error("[fadewatch] sandwich check failed:", (err as Error).message);
+    }
   }
 
   /**
@@ -354,12 +478,18 @@ export class FadeWatcher {
     }
   }
 
-  /** Sleep until `t`, reading Telegram replies while waiting when an inbox is set. */
+  /**
+   * Sleep until `t`, reading Telegram replies while waiting when an inbox is
+   * set, and checking open calls for a sandwich about once a minute.
+   */
   private async waitUntil(t: number): Promise<void> {
     while (this.running && Date.now() < t) {
-      const leftSec = (t - Date.now()) / 1000;
+      await this.maybeCheckSandwiches();
+      // Never wait past the next sandwich check (or `t`).
+      const until = Math.min(t, Math.max(this.nextSandwichCheck, Date.now() + 1000));
+      const leftSec = (until - Date.now()) / 1000;
       if (this.inbox === null || leftSec < 3) {
-        await sleep(t - Date.now(), () => this.running);
+        await sleep(until - Date.now(), () => this.running);
         continue;
       }
       try {
@@ -373,7 +503,7 @@ export class FadeWatcher {
           `[fadewatch] reading replies failed${transient ? " (will retry in 10s)" : ""}:`,
           (err as Error).message
         );
-        await sleep(Math.min(transient ? 10_000 : 60_000, t - Date.now()), () => this.running);
+        await sleep(Math.min(transient ? 10_000 : 60_000, until - Date.now()), () => this.running);
       }
     }
   }
@@ -396,6 +526,13 @@ export class FadeWatcher {
     if (!fresh(lead!) || !targets.every(fresh)) return false;
 
     const holdMs = this.cfg.params.holdBars * this.barMs;
+    let reading: StageReading;
+    try {
+      reading = await this.updateStage(now);
+    } catch (err) {
+      console.error("[fadewatch] reading the record failed:", (err as Error).message);
+      reading = { stage: this.state.stage ?? "skeptical", rate: null, settled: 0, wins: 0 };
+    }
     for (let k = 0; k < this.cfg.targets.length; k++) {
       const symbol = this.cfg.targets[k]!;
       const candles = targets[k]!;
@@ -432,7 +569,8 @@ export class FadeWatcher {
           `${this.cfg.lead} ${pct(sig.leadPct)} and ${symbol} ${pct(sig.ownPct)} over the last ${winMin}m — both ${moved}, fade it.\n` +
           `Bet ${sig.bet} for ${holdMin}m · settles ~${hhmm(now + holdMs)} UTC · 5m close was ${sig.signalClose}\n` +
           `Alert is ${lateSec}s after the bar close. Enter now or skip: 5m late is roughly breakeven.\n` +
-          (bt === undefined ? "" : `Backtest ${(bt * 100).toFixed(1)}% over 540d vs ${(this.cfg.breakeven * 100).toFixed(1)}% breakeven.`),
+          (bt === undefined ? "" : `Backtest ${(bt * 100).toFixed(1)}% over 540d vs ${(this.cfg.breakeven * 100).toFixed(1)}% breakeven.\n`) +
+          stageLine(reading, this.cfg.confidence),
         strategy: "fade-watch",
         live: false,
         ts: now,
@@ -544,6 +682,9 @@ export class FadeWatcher {
         handled: s.handled ?? {},
         ...(s.tgOffset === undefined ? {} : { tgOffset: s.tgOffset }),
         ...(s.warned === undefined ? {} : { warned: s.warned }),
+        ...(s.stage === undefined ? {} : { stage: s.stage }),
+        ...(s.stageSince === undefined ? {} : { stageSince: s.stageSince }),
+        ...(s.sandwiched === undefined ? {} : { sandwiched: s.sandwiched }),
       };
     } catch {
       this.state = { openUntil: {}, handled: {} };
@@ -566,7 +707,8 @@ export class FadeWatcher {
       `[fadewatch] ${mode} · ${this.cfg.lead} ≥ ${(p.leadMovePct * 100).toFixed(2)}% + ${this.cfg.targets.join("/")} ≥ ${(p.ownMovePct * 100).toFixed(2)}% ` +
         `(${p.side}) → ${p.holdBars * (this.barMs / 60_000)}m · max late ${this.cfg.maxLateSec}s · alerts=[${this.dispatcher.channelNames.join(",")}]` +
         ` · replies=${this.inbox === null ? "off" : "on"}` +
-        ` · shadow=[${this.cfg.shadowRules.map((r) => r.id).join(",")}]`
+        ` · shadow=[${this.cfg.shadowRules.map((r) => r.id).join(",")}]` +
+        ` · stage=${this.state.stage ?? "skeptical"} · sandwich=${this.cfg.sandwich.enabled ? `${(this.cfg.sandwich.dipPct * 100).toFixed(2)}%/${this.cfg.sandwich.withinMin}m` : "off"}`
     );
   }
 
@@ -575,6 +717,7 @@ export class FadeWatcher {
     this.loadState();
     this.banner("one-shot");
     if (!(await this.tick(Date.now()))) console.log("[fadewatch] latest bar not printed yet — nothing evaluated");
+    await this.maybeCheckSandwiches();
     try {
       await this.checkReplies(0);
     } catch (err) {
@@ -662,6 +805,21 @@ export function fadeWatchConfigFromEnv(opts: { lead: string; breakeven: number }
     // FADE_SHADOW=off disables the shadow rules.
     shadowRules: (raw("FADE_SHADOW") ?? "on").toLowerCase() === "off" ? [] : [ARB_15M_SHADOW],
     shadowJournalPath: raw("FADE_SHADOW_PATH") ?? "./data/fade-shadow.jsonl",
+    // Confident once 50 calls have settled and the last 50 win ≥ 55%; back to
+    // skeptical when they fall below breakeven.
+    confidence: {
+      window: Math.max(10, Math.round(num("FADE_CONFIDENCE_WINDOW", 50))),
+      minSettled: Math.max(10, Math.round(num("FADE_CONFIDENCE_WINDOW", 50))),
+      upAt: num("FADE_CONFIDENCE_UP_PCT", 55) / 100,
+      downBelow: opts.breakeven,
+    },
+    // FADE_SANDWICH=off disables the dip sandwich (not even logged).
+    sandwich: {
+      enabled: (raw("FADE_SANDWICH") ?? "on").toLowerCase() !== "off",
+      dipPct: num("FADE_SANDWICH_DIP_PCT", 0.2) / 100,
+      withinMin: num("FADE_SANDWICH_WITHIN_MIN", 15),
+    },
+    sandwichesPath: raw("FADE_SANDWICHES_PATH") ?? "./data/fade-sandwiches.jsonl",
   };
 }
 

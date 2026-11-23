@@ -23,6 +23,14 @@ name: Fade watch
 # journaled to data/fade-shadow.jsonl, scored by --report, never alerted.
 # Set the FADE_SHADOW variable to "off" to stop them.
 #
+# Confidence: the bot starts SKEPTICAL (single-bet alerts only). Once 50 calls
+# have settled and the last 50 win 55%+ (FADE_CONFIDENCE_WINDOW / _UP_PCT) it
+# turns CONFIDENT and also sends dip-sandwich alerts: if an open call goes 0.2%
+# against within 15 min (FADE_SANDWICH_DIP_PCT / _WITHIN_MIN), add a second bet
+# that settles with the first. Below breakeven it drops back to skeptical.
+# Sandwich setups are logged to data/fade-sandwiches.jsonl either way.
+# FADE_SANDWICH=off disables them entirely.
+#
 # Reviews: when a call settles, the bot replies under the alert with how it
 # played out — clean win, narrow loss, gave it back, or a complete blowout.
 #
@@ -86,6 +94,7 @@ jobs:
             apps/prdt-bot/data/fade-reviews.jsonl
             apps/prdt-bot/data/imbalance-state.json
             apps/prdt-bot/data/fade-shadow.jsonl
+            apps/prdt-bot/data/fade-sandwiches.jsonl
           key: fade-watch-${{ github.run_id }}
           restore-keys: |
             fade-watch-
@@ -117,6 +126,11 @@ jobs:
           IMBALANCE_CAP_HOURS: ${{ vars.IMBALANCE_CAP_HOURS }}
           IMBALANCE_OFF: ${{ vars.IMBALANCE_OFF }}
           FADE_SHADOW: ${{ vars.FADE_SHADOW }}
+          FADE_SANDWICH: ${{ vars.FADE_SANDWICH }}
+          FADE_SANDWICH_DIP_PCT: ${{ vars.FADE_SANDWICH_DIP_PCT }}
+          FADE_SANDWICH_WITHIN_MIN: ${{ vars.FADE_SANDWICH_WITHIN_MIN }}
+          FADE_CONFIDENCE_WINDOW: ${{ vars.FADE_CONFIDENCE_WINDOW }}
+          FADE_CONFIDENCE_UP_PCT: ${{ vars.FADE_CONFIDENCE_UP_PCT }}
         run: |
           if [ "${{ github.event.inputs.test }}" = "true" ]; then
             npm run fadewatch --workspace=apps/prdt-bot -- --test
@@ -142,6 +156,7 @@ jobs:
             apps/prdt-bot/data/fade-reviews.jsonl
             apps/prdt-bot/data/imbalance-state.json
             apps/prdt-bot/data/fade-shadow.jsonl
+            apps/prdt-bot/data/fade-sandwiches.jsonl
           key: fade-watch-${{ github.run_id }}
       - name: Upload journal
         if: always()
@@ -154,6 +169,7 @@ jobs:
             apps/prdt-bot/data/fade-reviews.jsonl
             apps/prdt-bot/data/imbalance-state.json
             apps/prdt-bot/data/fade-shadow.jsonl
+            apps/prdt-bot/data/fade-sandwiches.jsonl
           if-no-files-found: ignore
       # Last step on purpose: the successor queues behind this job and starts
       # seconds after it exits. Skipped for test/report runs and when cancelled.

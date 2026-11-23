@@ -43,6 +43,10 @@ import { FadeOutcomeLog, TelegramInbox, callKey, formatRecord, latestOutcomes, w
 import { ImbalanceWatcher, imbalanceConfigFromEnv } from "./watch/imbalanceWatch.js";
 import { describeGap, describeStats, fmtPrice } from "./analysis/imbalance.js";
 import { FadeReviewLog } from "./watch/fadeReview.js";
+import {
+  readStage, SandwichLog, sandwichOutcome, stageLine, summarizeSandwiches,
+  type SandwichOutcome, type SandwichRecord, type Stage,
+} from "./watch/confidence.js";
 import { GRADES, GRADE_LABEL } from "./analysis/callReview.js";
 import { analyzePivotFollow, formatPivotFollow, DEFAULT_PIVOTFOLLOW_PARAMS, type PivotFollowParams } from "./analysis/pivotFollow.js";
 import { RegimeMonitor, regimeConfigFromEnv } from "./regime/run.js";
@@ -864,6 +868,30 @@ async function cmdFadeWatch(flags: Map<string, string>): Promise<void> {
         console.log(`  ${sym.padEnd(10)} n=${s.n}  win ${p(s.wins / s.n)}${bt === undefined ? "" : `  (backtest ${p(bt)})`}`);
       }
       console.log(sc.settled < 100 ? `  Judge it at 100+ settled setups (~3–5 weeks); until then it's too few to tell from luck.` : sc.wilsonLow > breakeven ? `  The 95% floor is above breakeven: candidate to promote to a real alert.` : `  Not proven yet: the 95% floor is still below breakeven.`);
+    }
+    // Confidence ladder: where the bot stands, and how the dip sandwiches did.
+    let stage: Stage = "skeptical";
+    try {
+      const st = JSON.parse(readFileSync(watchCfg.statePath ?? "./data/fadewatch-state.json", "utf8")) as { stage?: Stage; stageSince?: number };
+      stage = st.stage ?? "skeptical";
+    } catch {
+      // no state yet: skeptical
+    }
+    const results = reviews.slice().sort((a, b) => a.alertTs - b.alertTs).map((r) => r.finalPct > 0);
+    const reading = readStage(stage, results, watchCfg.confidence);
+    console.log(`\nConfidence · ${stageLine(reading, watchCfg.confidence)}`);
+    const sws = new SandwichLog(watchCfg.sandwichesPath ?? "./data/fade-sandwiches.jsonl").readAll();
+    if (sws.length > 0) {
+      const scored: { rec: SandwichRecord; outcome: SandwichOutcome }[] = [];
+      let open = 0;
+      for (const rec of sws) {
+        const settle = rec.settleAt + 60_000 <= Date.now() ? await priceAtSettle(rec.symbol, rec.settleAt) : null;
+        if (settle === null) open++;
+        else scored.push({ rec, outcome: sandwichOutcome(rec, settle) });
+      }
+      console.log(`Dip sandwiches (${(watchCfg.sandwich.dipPct * 100).toFixed(1)}% against within ${watchCfg.sandwich.withinMin}m): ${sws.length} setups · ${scored.length} settled · ${open} pending`);
+      for (const line of summarizeSandwiches(scored, cfg.payout)) console.log(line);
+      if (scored.length > 0 && scored.length < 30) console.log(`  Too few to judge yet (backtest: second bet wins 57–62%, both lose ~40%).`);
     }
     console.log("═══════════════════════════════════\n");
     return;
