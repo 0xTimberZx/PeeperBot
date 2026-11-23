@@ -81,6 +81,48 @@ export interface FadeCall {
   telegramMessageId?: number;
   /** Set on shadow calls: the id of the rule that would have fired. */
   rule?: string;
+  /** Peeper 1.02: the confirm symbol's move over the same window (null = no data). */
+  confirm?: { symbol: string; pct: number | null };
+}
+
+/**
+ * Peeper 1.02 — a confirmation check, recorded on every alert and scored in
+ * `--report`, never used to filter (yet). The question: did the confirm symbol
+ * join the dump? Backtest (271 days to 2026-11-23, live rule, BTC+ETH): when
+ * MSTR also fell ≥ 0.3% over the 30m window the call won 58.7% (57.8 / 60.4 /
+ * 58.0% by period, n=921); when it didn't, 50.3% (n=320) — below breakeven.
+ * Found by slicing after looking, so it is tracked before it may change alerts.
+ */
+export interface ConfirmCheck {
+  id: string;
+  symbol: string;
+  /** "Joined" = moved at least this far (fraction) the same way as the target. */
+  joinPct: number;
+  /** Backtest win rates, for the report. */
+  backtest: { joined: number; didnt: number };
+}
+
+export const MSTR_CONFIRM: ConfirmCheck = { id: "mstr", symbol: "MSTRUSDT", joinPct: 0.003, backtest: { joined: 0.587, didnt: 0.503 } };
+
+/**
+ * The confirm symbol's move over the signal's window, ending at `barClose`:
+ * close of the bar that closed at `barClose` over the close `windowBars` bars
+ * earlier. Null if either bar is missing.
+ */
+export function confirmMove(candles: readonly Candle[] | null, barClose: number, windowBars: number, barMs: number): number | null {
+  if (candles === null) return null;
+  const end = candles.find((c) => c.closeTime === barClose);
+  const start = candles.find((c) => c.closeTime === barClose - windowBars * barMs);
+  if (end === undefined || start === undefined || !(start.close > 0)) return null;
+  return end.close / start.close - 1;
+}
+
+/** Did the confirm symbol join the move (same direction as the target, by at least `joinPct`)? */
+export function confirmJoined(call: Pick<FadeCall, "bet" | "confirm">, joinPct: number): boolean | null {
+  const pct = call.confirm?.pct;
+  if (pct === null || pct === undefined) return null;
+  // An UP bet fades a dump: joining means the confirm symbol fell too.
+  return call.bet === "UP" ? pct <= -joinPct : pct >= joinPct;
 }
 
 export class FadeJournal {
@@ -200,6 +242,8 @@ export interface FadeWatchConfig {
   /** The dip sandwich: alerted only while confident, logged always. */
   sandwich: SandwichParams;
   sandwichesPath: string | null;
+  /** Peeper 1.02: recorded on each alert, never filters. Null = off. */
+  confirm: ConfirmCheck | null;
 }
 
 /** What the fade watch needs from the imbalance watch to explain a call going against you. */
@@ -524,6 +568,11 @@ export class FadeWatcher {
     const expectedClose = Math.floor(now / this.barMs) * this.barMs - 1;
     const fresh = (cs: readonly Candle[]): boolean => cs.some((c) => c.closeTime === expectedClose);
     if (!fresh(lead!) || !targets.every(fresh)) return false;
+    // Peeper 1.02: fetched alongside, awaited only when journaling, and never
+    // allowed to fail or delay the alert itself.
+    const confirm = this.cfg.confirm;
+    const confirmCandles: Promise<Candle[] | null> =
+      confirm === null ? Promise.resolve(null) : this.fetch(confirm.symbol, this.cfg.interval, limit).catch(() => null);
 
     const holdMs = this.cfg.params.holdBars * this.barMs;
     let reading: StageReading;
@@ -577,6 +626,8 @@ export class FadeWatcher {
       };
       const receipts = await this.dispatcher.dispatch(alert);
       const telegramMessageId = receipts["telegram"]?.messageId;
+      const confirmPct = confirm === null ? null : confirmMove(await confirmCandles, sig.barClose, this.cfg.params.windowBars, this.barMs);
+      if (confirm !== null) console.log(`[fadewatch] ${symbol}: ${confirm.symbol} ${confirmPct === null ? "no data" : pct(confirmPct)} over the window (Peeper 1.02, recorded only)`);
       this.journal?.append({
         ts: now,
         symbol,
@@ -591,6 +642,7 @@ export class FadeWatcher {
         leadPct: sig.leadPct,
         ownPct: sig.ownPct,
         ...(telegramMessageId === undefined ? {} : { telegramMessageId }),
+        ...(confirm === null ? {} : { confirm: { symbol: confirm.symbol, pct: confirmPct } }),
       });
     }
     // Open calls going against you: one warning each, no daily cap.
@@ -708,6 +760,7 @@ export class FadeWatcher {
         `(${p.side}) → ${p.holdBars * (this.barMs / 60_000)}m · max late ${this.cfg.maxLateSec}s · alerts=[${this.dispatcher.channelNames.join(",")}]` +
         ` · replies=${this.inbox === null ? "off" : "on"}` +
         ` · shadow=[${this.cfg.shadowRules.map((r) => r.id).join(",")}]` +
+        ` · confirm=${this.cfg.confirm?.symbol ?? "off"}` +
         ` · stage=${this.state.stage ?? "skeptical"} · sandwich=${this.cfg.sandwich.enabled ? `${(this.cfg.sandwich.dipPct * 100).toFixed(2)}%/${this.cfg.sandwich.withinMin}m` : "off"}`
     );
   }
@@ -820,6 +873,15 @@ export function fadeWatchConfigFromEnv(opts: { lead: string; breakeven: number }
       withinMin: num("FADE_SANDWICH_WITHIN_MIN", 15),
     },
     sandwichesPath: raw("FADE_SANDWICHES_PATH") ?? "./data/fade-sandwiches.jsonl",
+    // Peeper 1.02. FADE_CONFIRM=off disables it.
+    confirm:
+      (raw("FADE_CONFIRM") ?? "on").toLowerCase() === "off"
+        ? null
+        : {
+            ...MSTR_CONFIRM,
+            symbol: (raw("FADE_CONFIRM_SYMBOL") ?? MSTR_CONFIRM.symbol).toUpperCase(),
+            joinPct: num("FADE_CONFIRM_PCT", MSTR_CONFIRM.joinPct * 100) / 100,
+          },
   };
 }
 

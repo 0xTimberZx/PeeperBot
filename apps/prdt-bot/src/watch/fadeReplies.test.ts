@@ -126,7 +126,7 @@ describe("TelegramInbox + FadeWatcher.checkReplies", () => {
       const w = new FadeWatcher(
         { lead: "COREUSDT", targets: ["BTCUSDT"], interval: "5m", params: { windowBars: 6, holdBars: 6, leadMovePct: 0.015, ownMovePct: 0.0015, side: "dump" },
           maxLateSec: 120, wakeOffsetSec: 3, statePath: join(dir, "s.json"), journalPath: join(dir, "j.jsonl"),
-          outcomesPath: join(dir, "o.jsonl"), reviewsPath: null, backtestBlowoutRate: {}, backtest: {}, breakeven: 0.526, shadowRules: [], shadowJournalPath: null, confidence: { window: 50, minSettled: 50, upAt: 0.55, downBelow: 0.526 }, sandwich: { enabled: false, dipPct: 0.002, withinMin: 15 }, sandwichesPath: null },
+          outcomesPath: join(dir, "o.jsonl"), reviewsPath: null, backtestBlowoutRate: {}, backtest: {}, breakeven: 0.526, shadowRules: [], shadowJournalPath: null, confidence: { window: 50, minSettled: 50, upAt: 0.55, downBelow: 0.526 }, sandwich: { enabled: false, dipPct: 0.002, withinMin: 15 }, sandwichesPath: null, confirm: null },
         new AlertDispatcher([]),
         undefined,
         new TelegramInbox("TOKEN", CHAT)

@@ -67,6 +67,24 @@ describe("feed sources", () => {
     expect(c[1]!.close).toBe(12);
   });
 
+  it("falls back to the OKX perpetual for a symbol with no spot market (MSTR)", async () => {
+    process.env.FEED_SOURCE = "okx";
+    process.env.FEED_FALLBACKS = "";
+    const urls: string[] = [];
+    stubFetch((url) => {
+      urls.push(url);
+      if (url.includes("instId=MSTR-USDT-SWAP"))
+        return { ok: true, body: { code: "0", data: [["60000", "80", "81", "79", "80.5", "10", "0", "0", "1"]] } };
+      return { ok: true, body: { code: "51001", msg: "Instrument ID doesn't exist", data: [] } };
+    });
+    const c = await fetchKlines({ symbol: "MSTRUSDT", interval: "5m", limit: 1 });
+    expect(c[0]!.close).toBe(80.5);
+    await fetchKlines({ symbol: "MSTRUSDT", interval: "5m", limit: 1 });
+    // Spot tried once, then remembered as swap-only.
+    expect(urls.filter((u) => u.includes("instId=MSTR-USDT&"))).toHaveLength(1);
+    expect(urls.filter((u) => u.includes("instId=MSTR-USDT-SWAP"))).toHaveLength(2);
+  });
+
   it("normalizes Bybit newest-first rows into ascending candles", async () => {
     process.env.FEED_SOURCE = "bybit";
     process.env.FEED_FALLBACKS = "";

@@ -23,6 +23,11 @@ name: Fade watch
 # journaled to data/fade-shadow.jsonl, scored by --report, never alerted.
 # Set the FADE_SHADOW variable to "off" to stop them.
 #
+# Peeper 1.02: every alert also records MSTR's move over the same 30m window
+# (OKX's MSTR perpetual). --report splits the live record by whether MSTR
+# joined the dump. Recorded only — alerts are unchanged. FADE_CONFIRM=off
+# disables it; FADE_CONFIRM_SYMBOL / FADE_CONFIRM_PCT (0.3) tune it.
+#
 # Confidence: the bot starts SKEPTICAL (single-bet alerts only). Once 50 calls
 # have settled and the last 50 win 55%+ (FADE_CONFIDENCE_WINDOW / _UP_PCT) it
 # turns CONFIDENT and also sends dip-sandwich alerts: if an open call goes 0.2%
@@ -131,6 +136,9 @@ jobs:
           FADE_SANDWICH_WITHIN_MIN: ${{ vars.FADE_SANDWICH_WITHIN_MIN }}
           FADE_CONFIDENCE_WINDOW: ${{ vars.FADE_CONFIDENCE_WINDOW }}
           FADE_CONFIDENCE_UP_PCT: ${{ vars.FADE_CONFIDENCE_UP_PCT }}
+          FADE_CONFIRM: ${{ vars.FADE_CONFIRM }}
+          FADE_CONFIRM_SYMBOL: ${{ vars.FADE_CONFIRM_SYMBOL }}
+          FADE_CONFIRM_PCT: ${{ vars.FADE_CONFIRM_PCT }}
         run: |
           if [ "${{ github.event.inputs.test }}" = "true" ]; then
             npm run fadewatch --workspace=apps/prdt-bot -- --test

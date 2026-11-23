@@ -569,6 +569,17 @@ npm run bot:fadewatch -- --report   # score every past alert against price
   ETH 57.3%, BTC 56.3%, above breakeven in all three periods — but it was found
   by slicing results after looking, which is why it starts in shadow.
   `FADE_SHADOW=off` disables shadow rules.
+- **MSTR confirm — Peeper 1.02**: every alert also records how MSTR moved
+  over the same 30m window (OKX's MSTR perpetual; the feed falls back to the
+  perpetual for symbols with no spot market). `--report` splits the live
+  record into "MSTR joined the dump" (fell ≥ 0.3%) and "MSTR didn't".
+  Backtest (271 days, the live rule on BTC+ETH): joined 58.7% (57.8 / 60.4 /
+  58.0% by period, n=921), didn't 50.3% (n=320) — below breakeven, strongest
+  in US market hours and on weekends, absent on weekday nights. MSTR on its
+  own leads nothing (no lead-lag with BTC or CORE; as a fade lead it loses).
+  Found by slicing after looking, so it is **recorded only — alerts are
+  unchanged** until 100+ settled calls back it up. `FADE_CONFIRM=off`
+  disables it.
 - **Confidence ladder + dip sandwich**: the bot starts **skeptical** — single
   bets only. It turns **confident** once 50 calls have settled and the last 50
   won 55% or more, and drops back to skeptical if the last 50 fall below the
