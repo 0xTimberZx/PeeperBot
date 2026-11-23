@@ -42,7 +42,8 @@ function watcher(series: Record<string, Candle[]>, over: Partial<FadeWatchConfig
     backtest: { BTCUSDT: 0.564 },
     breakeven: 0.526,
     shadowRules: [],
-    shadowJournalPath: null,
+    shadowJournalPath: null, confidence: { window: 50, minSettled: 50, upAt: 0.55, downBelow: 0.526 }, sandwich: { enabled: false, dipPct: 0.002, withinMin: 15 }, sandwichesPath: null,
+    autoMissAfterMin: 120, againstPct: 0,
     ...over,
   };
   const w = new FadeWatcher(cfg, new AlertDispatcher([ch]), async (symbol) => series[symbol]!);
@@ -94,7 +95,7 @@ describe("FadeWatcher", () => {
     const ch = new Capture();
     let n = 3;
     const w = new FadeWatcher(
-      { lead: "COREUSDT", targets: ["BTCUSDT"], interval: "5m", params: P, maxLateSec: 120, wakeOffsetSec: 3, statePath: null, journalPath: null, outcomesPath: null, reviewsPath: null, backtestBlowoutRate: {}, backtest: {}, breakeven: 0.526, shadowRules: [], shadowJournalPath: null },
+      { lead: "COREUSDT", targets: ["BTCUSDT"], interval: "5m", params: P, maxLateSec: 120, wakeOffsetSec: 3, statePath: null, journalPath: null, outcomesPath: null, reviewsPath: null, backtestBlowoutRate: {}, backtest: {}, breakeven: 0.526, shadowRules: [], shadowJournalPath: null, confidence: { window: 50, minSettled: 50, upAt: 0.55, downBelow: 0.526 }, sandwich: { enabled: false, dipPct: 0.002, withinMin: 15 }, sandwichesPath: null },
       new AlertDispatcher([ch]),
       async (symbol) => s[symbol as keyof typeof s].slice(0, n)
     );
@@ -147,7 +148,7 @@ describe("FadeWatcher replies", () => {
     const series = { COREUSDT: candles([100, 100, 98]), BTCUSDT: candles([100, 100, 99.5]) };
     const w = new FadeWatcher(
       { lead: "COREUSDT", targets: ["BTCUSDT"], interval: "5m", params: P, maxLateSec: 120, wakeOffsetSec: 3, statePath: null,
-        journalPath: join(dir, "j.jsonl"), outcomesPath: join(dir, "o.jsonl"), reviewsPath: null, backtestBlowoutRate: {}, backtest: {}, breakeven: 0.526, shadowRules: [], shadowJournalPath: null },
+        journalPath: join(dir, "j.jsonl"), outcomesPath: join(dir, "o.jsonl"), reviewsPath: null, backtestBlowoutRate: {}, backtest: {}, breakeven: 0.526, shadowRules: [], shadowJournalPath: null, confidence: { window: 50, minSettled: 50, upAt: 0.55, downBelow: 0.526 }, sandwich: { enabled: false, dipPct: 0.002, withinMin: 15 }, sandwichesPath: null },
       new AlertDispatcher([new FakeTelegram()]),
       async (symbol) => series[symbol as keyof typeof series]
     );
@@ -188,7 +189,7 @@ describe("FadeWatcher reviews", () => {
     const w = new FadeWatcher(
       { lead: "COREUSDT", targets: ["BTCUSDT"], interval: "5m", params: { ...P, leadMovePct: 0.015 }, maxLateSec: 120, wakeOffsetSec: 3,
         statePath: null, journalPath: join(dir, "j.jsonl"), outcomesPath: join(dir, "o.jsonl"), reviewsPath: join(dir, "r.jsonl"),
-        backtestBlowoutRate: { BTCUSDT: 0.051 }, backtest: {}, breakeven: 0.526, shadowRules: [], shadowJournalPath: null },
+        backtestBlowoutRate: { BTCUSDT: 0.051 }, backtest: {}, breakeven: 0.526, shadowRules: [], shadowJournalPath: null, confidence: { window: 50, minSettled: 50, upAt: 0.55, downBelow: 0.526 }, sandwich: { enabled: false, dipPct: 0.002, withinMin: 15 }, sandwichesPath: null },
       new AlertDispatcher([]),
       fetch,
       inbox as never
@@ -220,7 +221,7 @@ describe("FadeWatcher shadow rules", () => {
     const w = new FadeWatcher(
       { lead: "COREUSDT", targets: ["BTCUSDT"], interval: "5m", params: P, maxLateSec: 120, wakeOffsetSec: 3, statePath: null,
         journalPath: join(dir, "j.jsonl"), outcomesPath: null, reviewsPath: null, backtestBlowoutRate: {}, backtest: {}, breakeven: 0.526, autoMissAfterMin: 120, againstPct: 0.003,
-        shadowRules: [rule], shadowJournalPath: join(dir, "shadow.jsonl") },
+        shadowRules: [rule], shadowJournalPath: join(dir, "shadow.jsonl"), confidence: { window: 50, minSettled: 50, upAt: 0.55, downBelow: 0.526 }, sandwich: { enabled: false, dipPct: 0.002, withinMin: 15 }, sandwichesPath: null },
       new AlertDispatcher([ch]),
       async (symbol) => all[symbol as keyof typeof all].slice(0, n)
     );
@@ -238,7 +239,7 @@ describe("FadeWatcher shadow rules", () => {
     const w = new FadeWatcher(
       { lead: "COREUSDT", targets: ["BTCUSDT"], interval: "5m", params: P, maxLateSec: 120, wakeOffsetSec: 3, statePath: null,
         journalPath: null, outcomesPath: null, reviewsPath: null, backtestBlowoutRate: {}, backtest: {}, breakeven: 0.526, autoMissAfterMin: 120, againstPct: 0.003,
-        shadowRules: [], shadowJournalPath: "/nonexistent/should-not-be-written.jsonl" },
+        shadowRules: [], shadowJournalPath: "/nonexistent/should-not-be-written.jsonl", confidence: { window: 50, minSettled: 50, upAt: 0.55, downBelow: 0.526 }, sandwich: { enabled: false, dipPct: 0.002, withinMin: 15 }, sandwichesPath: null },
       new AlertDispatcher([]),
       async () => { throw new Error("should not fetch"); }
     );
@@ -257,5 +258,86 @@ describe("ARB_15M_SHADOW", () => {
     } finally {
       delete process.env["FADE_SHADOW"];
     }
+  });
+});
+
+describe("FadeWatcher confidence and the dip sandwich", () => {
+  const MIN = 60_000;
+  const T0 = 1_800_000_000_000;
+  const call = {
+    ts: T0, symbol: "BTCUSDT", lead: "COREUSDT", bet: "UP", barClose: T0 - 3001, lateSec: 3, signalClose: 100,
+    alertPrice: 100, settleAt: T0 + 30 * MIN, holdMin: 30, leadPct: -0.02, ownPct: -0.005,
+  };
+  const review = (i: number, win: boolean): object => ({
+    grade: win ? "clean-win" : "narrow-loss", finalPct: win ? 0.002 : -0.001, bestPct: 0, worstPct: 0, bestAtMin: 0, worstAtMin: 0,
+    minutesAhead: 0, minutesTotal: 30, typicalPct: 0.004, settlePrice: 100, leadHoldPct: null,
+    reviewedAt: i, symbol: "BTCUSDT", barClose: i, bet: "UP", alertTs: i, entryPrice: 100,
+  });
+
+  async function setup(opts: { wins?: number; price: number; reviews?: number }) {
+    const { mkdtempSync, writeFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const { tmpdir } = await import("node:os");
+    const dir = mkdtempSync(join(tmpdir(), "fadesw-"));
+    writeFileSync(join(dir, "j.jsonl"), JSON.stringify(call) + "\n");
+    const n = opts.reviews ?? 0;
+    if (n > 0) writeFileSync(join(dir, "r.jsonl"), Array.from({ length: n }, (_, i) => JSON.stringify(review(i, i < (opts.wins ?? 0)))).join("\n") + "\n");
+    const ch = new Capture();
+    let price = opts.price;
+    const w = new FadeWatcher(
+      { lead: "COREUSDT", targets: ["BTCUSDT"], interval: "5m", params: P, maxLateSec: 120, wakeOffsetSec: 3, statePath: join(dir, "state.json"),
+        journalPath: join(dir, "j.jsonl"), outcomesPath: null, reviewsPath: join(dir, "r.jsonl"), backtestBlowoutRate: {}, backtest: {}, breakeven: 0.526,
+        autoMissAfterMin: 120, againstPct: 0, shadowRules: [], shadowJournalPath: null,
+        confidence: { window: 50, minSettled: 50, upAt: 0.55, downBelow: 0.526 }, sandwich: { enabled: true, dipPct: 0.002, withinMin: 15 },
+        sandwichesPath: join(dir, "sw.jsonl") },
+      new AlertDispatcher([ch]),
+      async (_s, interval) => (interval === "1m" ? [{ openTime: 0, open: price, high: price, low: price, close: price, volume: 1, closeTime: 1 }] : [])
+    );
+    const log = async () => {
+      const { readFileSync, existsSync } = await import("node:fs");
+      const p = join(dir, "sw.jsonl");
+      return existsSync(p) ? readFileSync(p, "utf8").trim().split("\n").map((l) => JSON.parse(l)) : [];
+    };
+    return { w, sent: ch.sent, log, setPrice: (x: number) => (price = x) };
+  }
+
+  it("while skeptical, logs a sandwich setup without sending it, once per call", async () => {
+    const { w, sent, log } = await setup({ price: 99.75 });
+    expect(await w.checkSandwiches(T0 + 5 * MIN)).toBe(1);
+    expect(await w.checkSandwiches(T0 + 6 * MIN)).toBe(0);
+    expect(sent).toHaveLength(0);
+    expect(await log()).toEqual([expect.objectContaining({ symbol: "BTCUSDT", strike: 99.75, firstEntry: 100, stage: "skeptical", sent: false, minutesLeft: 25 })]);
+  });
+
+  it("does not trigger on a smaller dip or after the first 15 minutes", async () => {
+    const small = await setup({ price: 99.85 });
+    expect(await small.w.checkSandwiches(T0 + 5 * MIN)).toBe(0);
+    const late = await setup({ price: 99.5 });
+    expect(await late.w.checkSandwiches(T0 + 16 * MIN)).toBe(0);
+  });
+
+  it("earns confidence from its record, says so, then sends sandwich alerts", async () => {
+    const { w, sent, log } = await setup({ price: 99.75, reviews: 50, wins: 29 });
+    const r = await w.updateStage(T0 + 4 * MIN);
+    expect(r).toMatchObject({ stage: "confident", wins: 29 });
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ strategy: "fade-confidence", kind: "info" });
+    expect(sent[0]!.reason).toContain("now CONFIDENT");
+    expect(await w.updateStage(T0 + 4 * MIN)).toMatchObject({ stage: "confident" });
+    expect(sent).toHaveLength(1); // no repeat while the stage holds
+
+    expect(await w.checkSandwiches(T0 + 5 * MIN)).toBe(1);
+    expect(sent).toHaveLength(2);
+    expect(sent[1]).toMatchObject({ strategy: "fade-sandwich", direction: "UP", entryPrice: 99.75 });
+    expect(sent[1]!.reason).toContain(`settle at ${new Date(call.settleAt).toISOString().slice(11, 16)} UTC — 25 min`);
+    expect((await log())[0]).toMatchObject({ stage: "confident", sent: true });
+  });
+
+  it("stays skeptical with fewer than 50 settled calls, and every alert says why", async () => {
+    const { w } = await setup({ price: 100, reviews: 20, wins: 20 });
+    expect(w.confidence()).toMatchObject({ stage: "skeptical", settled: 20 });
+    const { w: w2, sent } = watcher({ COREUSDT: candles([100, 100, 98]), BTCUSDT: candles([100, 100, 99.5]) });
+    await w2.tick(3 * BAR + 4000);
+    expect(sent[0]!.reason).toContain("Mode: SKEPTICAL — single bet only (0 of 50 calls settled");
   });
 });
