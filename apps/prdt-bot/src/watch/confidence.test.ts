@@ -34,10 +34,10 @@ describe("readStage", () => {
   });
 
   it("explains itself", () => {
-    expect(stageLine(readStage("skeptical", rec(10, 12), C), C)).toContain("12 of 50 calls settled");
-    expect(stageLine(readStage("skeptical", rec(28), C), C)).toContain("CONFIDENT");
-    expect(stageChangeMessage("skeptical", readStage("skeptical", rec(28), C), C)).toContain("now CONFIDENT");
-    expect(stageChangeMessage("confident", readStage("confident", rec(20), C), C)).toContain("back to SKEPTICAL");
+    expect(stageLine(readStage("skeptical", rec(10, 12), C), C)).toContain("until 50 results are in (12 so far)");
+    expect(stageLine(readStage("skeptical", rec(28), C), C)).toContain("Mode: confident");
+    expect(stageChangeMessage("skeptical", readStage("skeptical", rec(28), C), C)).toContain("now in confident mode");
+    expect(stageChangeMessage("confident", readStage("confident", rec(20), C), C)).toContain("back in skeptical mode");
   });
 });
 
@@ -68,9 +68,10 @@ describe("sandwich scoring", () => {
 
   it("tells you when to set the second bet to settle", () => {
     const m = sandwichMessage(up, { pay: 1.9 });
-    expect(m).toContain("Add a second UP bet now");
-    expect(m).toContain("settle at 14:30 UTC — 22 min");
-    expect(m).toContain("split (-0.1)");
+    expect(m).toContain("Optional second UP bet · BTC");
+    expect(m).toContain("Add UP now");
+    expect(m).toContain("settle 14:30 UTC (22 min)");
+    expect(m).toContain("in between: −0.1");
   });
 
   it("summarizes sent and logged-only sandwiches separately", () => {

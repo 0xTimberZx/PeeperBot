@@ -610,7 +610,7 @@ async function cmdPosWatch(flags: Map<string, string>): Promise<void> {
     const st = loadPosState(statePath);
 
     const res = evaluatePosition(candles, spec, 3);
-    const guard = evaluateProfitGuard(candles, breakeven, spec.side, st.guard, 3, guardParams);
+    const guard = evaluateProfitGuard(candles, breakeven, spec.side, st.guard, 3, guardParams, spec.symbol);
 
     // Combined per-label latch: approach levels heading toward, plus a synthetic
     // "profit-guard" label when the give-back fires. Alert only on NEW labels.
@@ -650,7 +650,7 @@ async function cmdPosWatch(flags: Map<string, string>): Promise<void> {
     try {
       const candles = await fetchKlines({ symbol: spec.symbol, interval, limit: 60 });
       const res = evaluatePosition(candles, spec, 3);
-      const guard = evaluateProfitGuard(candles, breakeven, spec.side, guardState, 3, guardParams);
+      const guard = evaluateProfitGuard(candles, breakeven, spec.side, guardState, 3, guardParams, spec.symbol);
       guardState = guard.state;
 
       if (res.triggered && !latched) {
@@ -799,7 +799,7 @@ async function cmdFadeWatch(flags: Map<string, string>): Promise<void> {
       direction: "UP",
       confidence: 0.56,
       entryPrice: 0,
-      reason: "TEST — this is what a fade alert looks like. No setup is live; do not trade this.",
+      reason: "TEST — a sample bet signal to check delivery. Nothing is live; don't bet on this.",
       strategy: "fade-watch",
       live: false,
       ts: Date.now(),

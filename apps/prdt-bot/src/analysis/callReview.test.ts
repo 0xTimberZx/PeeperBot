@@ -50,10 +50,10 @@ describe("reviewCall", () => {
     expect(r.minutesAhead).toBe(0);
     expect(r.minutesTotal).toBe(30);
     expect(r.worstAtMin).toBe(30);
-    expect(reviewLines(r)[0]).toContain("Never ahead");
-    expect(reviewLines(r)[0]).toContain("2.5× a typical 30m move");
+    expect(reviewLines(r)[0]).toContain("never ahead");
+    expect(reviewLines(r)[0]).toMatch(/^−1\.00% at settle/); // jargon-free: the settle first, no "typical move" units
     expect(leadLine(r, { lead: "COREUSDT", target: "BTCUSDT", bet: "UP", leadMovePct: 0.015 })).toBe(
-      "CORE kept falling: −2.00% more during the hold — the dump hadn't finished."
+      "CORE kept falling (−2.00%) — the drop hadn't finished."
     );
   });
 
@@ -63,7 +63,7 @@ describe("reviewCall", () => {
     expect(r.grade).toBe("gave-it-back");
     expect(r.bestAtMin).toBe(6);
     expect(r.minutesAhead).toBe(24);
-    expect(reviewLines(r)[0]).toBe("Was ahead +0.50% at minute 6, settled −0.10%.");
+    expect(reviewLines(r)[0]).toBe("−0.10% at settle · was +0.50% at min 6 · ahead 24 of 30 min");
   });
 
   it("signs everything in the bet's favour for a DOWN bet", () => {
@@ -75,7 +75,7 @@ describe("reviewCall", () => {
 
   it("says when the lead bounced but the target didn't follow", () => {
     const r = reviewCall({ bet: "UP", entryPrice: 100, path: path(flatBars(30, 99.9)), typicalPct: 0.004, leadHoldPct: 0.012 })!;
-    expect(leadLine(r, { lead: "COREUSDT", target: "ETHUSDT", bet: "UP", leadMovePct: 0.015 })).toBe("CORE bounced +1.20%, but ETH didn't follow.");
+    expect(leadLine(r, { lead: "COREUSDT", target: "ETHUSDT", bet: "UP", leadMovePct: 0.015 })).toBe("CORE bounced (+1.20%), but ETH didn't follow.");
   });
 
   it("returns null with no path", () => {

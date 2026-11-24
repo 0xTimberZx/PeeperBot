@@ -136,8 +136,7 @@ export function inNyOpenWindow(ts: number): boolean {
 }
 
 export const NY_OPEN_CAUTION =
-  "⚠️ NY open (09:00–10:30 ET): this alert has been only breakeven here — 52.7% over 165 backtest trades (42 / 66 / 44% by period) " +
-  "vs 57% at other times. Moves at the open tend to keep going. Consider skipping it or betting smaller.";
+  "⚠️ NY open (09:00–10:30 ET): only breakeven at this hour in testing (53% vs 57% other times) — moves here tend to keep going. Skip or bet smaller.";
 
 /** Did the confirm symbol join the move (same direction as the target, by at least `joinPct`)? */
 export function confirmJoined(call: Pick<FadeCall, "bet" | "confirm">, joinPct: number): boolean | null {
@@ -300,6 +299,8 @@ const SANDWICH_CHECK_MS = 60_000;
 const REVIEW_MAX_AGE_MS = 6 * 3_600_000;
 
 const pct = (x: number): string => `${x >= 0 ? "+" : ""}${(x * 100).toFixed(2)}%`;
+/** For messages: a real minus sign, and one decimal unless the move is small. */
+export const signedPct = (x: number): string => `${x >= 0 ? "+" : "−"}${Math.abs(x * 100).toFixed(Math.abs(x) < 0.001 ? 2 : 1)}%`;
 const hhmm = (t: number): string => new Date(t).toISOString().slice(11, 16);
 
 export class FadeWatcher {
@@ -408,7 +409,7 @@ export class FadeWatcher {
       console.log(`[fadewatch] ${call.symbol}: sandwich setup (${(against * 100).toFixed(2)}% against) — alert sent`);
       const text =
         sandwichMessage(rec, { pay: 1 / this.cfg.breakeven }) +
-        (this.cfg.nyOpenCaution && inNyOpenWindow(now) ? `\n⚠️ NY open (09:00–10:30 ET): moves here tend to keep going — a second bet doubles the risk.` : "");
+        (this.cfg.nyOpenCaution && inNyOpenWindow(now) ? `\n⚠️ NY open: moves at this hour tend to keep going — a second bet doubles the risk.` : "");
       try {
         if (this.inbox !== null && call.telegramMessageId !== undefined) await this.inbox.reply(call.telegramMessageId, text);
         else
@@ -633,7 +634,9 @@ export class FadeWatcher {
       const holdMin = Math.round(holdMs / 60_000);
       const winMin = Math.round((this.cfg.params.windowBars * this.barMs) / 60_000);
       const bt = this.cfg.backtest[symbol];
-      const moved = sig.bet === "UP" ? "dumped" : "pumped";
+      const tag = (x: string): string => x.replace(/USDT$/, "");
+      const what = sig.bet === "UP" ? "drops" : "pumps";
+      const did = sig.bet === "UP" ? "bounced" : "pulled back";
       const alert: Alert = {
         symbol,
         timeframeMin: holdMin,
@@ -641,10 +644,11 @@ export class FadeWatcher {
         confidence: bt ?? 0,
         entryPrice: alertPrice,
         reason:
-          `${this.cfg.lead} ${pct(sig.leadPct)} and ${symbol} ${pct(sig.ownPct)} over the last ${winMin}m — both ${moved}, fade it.\n` +
-          `Bet ${sig.bet} for ${holdMin}m · settles ~${hhmm(now + holdMs)} UTC · 5m close was ${sig.signalClose}\n` +
-          `Alert is ${lateSec}s after the bar close. Enter now or skip: 5m late is roughly breakeven.\n` +
-          (bt === undefined ? "" : `Backtest ${(bt * 100).toFixed(1)}% over 540d vs ${(this.cfg.breakeven * 100).toFixed(1)}% breakeven.\n`) +
+          `Settles ~${hhmm(now + holdMs)} UTC · sent ${lateSec}s after the 5m close — enter now or skip (5 min late has no edge).\n` +
+          `Why: ${tag(this.cfg.lead)} ${signedPct(sig.leadPct)} and ${tag(symbol)} ${signedPct(sig.ownPct)} in ${winMin} min. ` +
+          (bt === undefined
+            ? `Joint ${what} like this tend to reverse.\n`
+            : `Joint ${what} like this ${did} ${(bt * 100).toFixed(0)}% of the time in testing (${(this.cfg.breakeven * 100).toFixed(1)}% needed to profit).\n`) +
           stageLine(reading, this.cfg.confidence) +
           (this.cfg.nyOpenCaution && inNyOpenWindow(now) ? `\n${NY_OPEN_CAUTION}` : ""),
         strategy: "fade-watch",
@@ -721,20 +725,20 @@ export class FadeWatcher {
       const ctx = this.imbalance === null ? null : await this.imbalance.context(call.symbol, now);
       const gap = ctx === null ? null : gapAgainst(ctx.states, price, heading, ctx.atr4h);
       const minsLeft = Math.max(0, Math.round((call.settleAt - now) / 60_000));
+      const sym = call.symbol.replace(/USDT$/, "");
       const lines = [
-        `⚠️ ${call.symbol} ${call.bet} call going against you: ${pct(call.bet === "UP" ? -against : against)} since the alert ` +
+        `⚠️ ${sym} ${call.bet} bet losing: ${signedPct(call.bet === "UP" ? -against : against)} ` +
           `(${fmtPrice(call.alertPrice)} → ${fmtPrice(price)}), ${minsLeft} min left.`,
       ];
       if (gap !== null) {
         const toEnd = (gap.far - price) / price;
         lines.push(
-          `Heading ${heading} into the ${describeGap(gap)}. End of the imbalance: ${fmtPrice(gap.far)} (${pct(toEnd)} from here) — ` +
-            `where the move most likely stalls, if it does.`
+          `Next likely pause: the ${describeGap(gap)}. Fast moves often stall by its far end, ` +
+            `${fmtPrice(gap.far)} (${Math.abs(toEnd * 100).toFixed(1)}% ${heading === "down" ? "below" : "above"}).`
         );
       } else if (ctx !== null) {
-        lines.push(`No unfilled 4h or daily imbalance within reach ${heading === "down" ? "below" : "above"} — no nearby level to expect it to stall at.`);
+        lines.push(`No unfilled price gap within reach ${heading === "down" ? "below" : "above"} — no obvious place for it to pause.`);
       }
-      lines.push("Dry-run call: nothing was traded.");
       const text = lines.join("\n");
       console.log(`[fadewatch] ${call.symbol}: call @${hhmm(call.ts)} UTC is ${(against * 100).toFixed(2)}% against — warning sent`);
       try {

@@ -7,7 +7,7 @@
 import { readFileSync, appendFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import type { Candle, Interval } from "../feed/binance.js";
-import { GRADE_LABEL, leadLine, reviewCall, reviewLines, typicalMove, type CallReview } from "../analysis/callReview.js";
+import { RESULT_HEADLINE, leadLine, reviewCall, reviewLines, typicalMove, type CallReview } from "../analysis/callReview.js";
 import type { FadeCall } from "./fadeWatch.js";
 import type { ReplyOutcome } from "./fadeReplies.js";
 
@@ -93,16 +93,15 @@ export function formatReviewMessage(
   }
 ): string {
   const won = r.finalPct > 0;
-  const lines = [`📋 Review · ${call.symbol} ${call.bet} from ${hhmm(call.ts)} UTC → ${won ? "WON" : "LOST"} — ${GRADE_LABEL[r.grade]}`, ...reviewLines(r)];
+  const sym = call.symbol.replace(/USDT$/, "");
+  const lines = [`${RESULT_HEADLINE[r.grade]} · ${sym} ${call.bet} from ${hhmm(call.ts)} UTC`, ...reviewLines(r)];
   const lead = leadLine(r, { lead: opts.lead, target: call.symbol, bet: call.bet, leadMovePct: opts.leadMovePct });
   if (lead !== null) lines.push(lead);
   if (r.grade === "blowout" && opts.backtestBlowoutRate !== undefined) {
-    lines.push(
-      `Blowouts were ${(opts.backtestBlowoutRate * 100).toFixed(1)}% of backtest trades, and about 2 in 3 came while ${opts.lead.replace("USDT", "")} was still falling. One is normal; a run of them is not.`
-    );
+    lines.push(`About 1 in ${Math.max(5, Math.round(1 / opts.backtestBlowoutRate / 5) * 5)} bets ends like this in testing. One is normal; several close together is a warning.`);
   }
   if ((opts.yourAnswer === "won" || opts.yourAnswer === "lost") && (opts.yourAnswer === "won") !== won) {
-    lines.push(`You logged ${opts.yourAnswer.toUpperCase()}; the price at the alert says ${won ? "WON" : "LOST"} — a late entry or a different strike?`);
+    lines.push(`You replied ${opts.yourAnswer.toUpperCase()}, but the price at the alert says ${won ? "WON" : "LOST"} — a late entry or a different strike?`);
   }
   return lines.join("\n");
 }

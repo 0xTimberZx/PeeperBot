@@ -267,7 +267,7 @@ export function handleReplies(
     log.push(outcome);
     const filled = withAutoMissed(calls, latestOutcomes(log), m.date * 1000);
     const record = formatRecord(yourRecord(calls, filled.answers, filled.auto));
-    const which = `${call.symbol} ${call.bet} from ${hhmm(call.ts)} UTC`;
+    const which = `${call.symbol.replace(/USDT$/, "")} ${call.bet} from ${hhmm(call.ts)} UTC`;
     let head: string;
     if (verdict === "undo") head = before === undefined ? `Nothing to undo on ${which}.` : `Cleared ${LABEL[before]} on ${which}.`;
     else if (before !== undefined && before !== verdict) head = `Changed ${which}: ${LABEL[before]} → ${LABEL[verdict]}.`;

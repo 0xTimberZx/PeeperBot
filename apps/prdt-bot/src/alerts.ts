@@ -35,20 +35,38 @@ export interface AlertChannel {
   send(alert: Alert): Promise<SendReceipt | void>;
 }
 
+/** Plain-English titles for the senders, so no internal job name reaches a reader. */
+const TITLE: Record<string, string> = {
+  "fade-watch": "Bet signal",
+  "fade-review": "Result",
+  "fade-against": "Bet going against you",
+  "fade-sandwich": "Optional second bet",
+  "fade-confidence": "Bot update",
+  imbalance: "Price gap ahead",
+  "position-watch": "Your position",
+  "core-bottom-watch": "CORE bottom watch",
+  "regime-monitor": "Market mood",
+  "aave-health": "Aave loan health",
+  "entry-autopsy": "Trade check",
+};
+
+/** BTCUSDT → BTC, "BTCUSDT/ETHUSDT" → "BTC/ETH". */
+export function shortSymbol(symbol: string): string {
+  return symbol.replace(/(USDT|USDC|USD)\b/g, "");
+}
+
+const fmtNum = (x: number): string => x.toLocaleString("en-US", { maximumFractionDigits: x >= 100 ? 0 : 4 });
+
+/** True when text opens with an emoji: the body carries its own headline. */
+const hasHeadline = (text: string): boolean => /^\p{Extended_Pictographic}/u.test(text);
+
 export function formatAlert(a: Alert): string {
-  // Macro/info alert: headline + body, no trade line.
-  if (a.kind === "info") {
-    return `📡 PeeperBot · ${a.strategy} (${a.symbol})\n${a.reason}`;
-  }
-  // Trade-round call.
-  const mode = a.live ? "LIVE TRADE" : "SIGNAL (dry-run)";
-  const conf = (a.confidence * 100).toFixed(0);
-  return (
-    `🔔 PeeperBot ${mode}\n` +
-    `${a.symbol} · ${a.timeframeMin}m · ${a.direction} @ ${a.entryPrice}\n` +
-    `confidence ${conf}% · ${a.strategy}\n` +
-    `${a.reason}`
-  );
+  const title = TITLE[a.strategy] ?? a.strategy.replace(/-/g, " ").replace(/^./, (c) => c.toUpperCase());
+  // Info: the body speaks for itself; add a plain title only if it has no headline.
+  if (a.kind === "info") return hasHeadline(a.reason) ? a.reason : `📡 ${title} · ${shortSymbol(a.symbol)}\n${a.reason}`;
+  // A bet call: what to bet, then why. The bot never trades unless marked LIVE.
+  const at = a.entryPrice > 0 ? ` @ ${fmtNum(a.entryPrice)}` : "";
+  return `🔔 ${shortSymbol(a.symbol)} — bet ${a.direction}, ${a.timeframeMin} min${at}${a.live ? " · LIVE TRADE PLACED" : ""}\n${a.reason}`;
 }
 
 /** stdout channel — always on. */

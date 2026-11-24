@@ -118,15 +118,15 @@ export function evaluatePosition(
 /** Reversion vs trend lean, in plain language. A fading approach looks like the
  *  snap-back you can work with; an accelerating one looks like real flow. */
 export function leanText(mom: Momentum, approachingStop: boolean): string {
-  if (mom.dir === "flat") return "momentum flat — no clear push";
+  if (mom.dir === "flat") return "No clear push either way.";
   if (mom.decelerating) {
     return approachingStop
-      ? "momentum fading into your stop → it may reject here (relief), not break"
-      : "momentum fading → looks like a reversion/exhaustion, not a breakout";
+      ? "The push into your stop is fading — more likely to bounce off it than break through."
+      : "The push is fading — more likely to stall or reverse than keep running.";
   }
   return approachingStop
-    ? "⚠️ momentum ACCELERATING into your stop → real push, mind the invalidation"
-    : "momentum accelerating → looks like a real trend leg, not a fade";
+    ? "⚠️ Speeding up into your stop — this looks like a real move. Mind your exit."
+    : "Speeding up — this looks like a real move, not a blip.";
 }
 
 function buildBody(
@@ -136,29 +136,28 @@ function buildBody(
   hits: LevelHit[],
   nearest: LevelHit | null
 ): string {
-  const ladder = spec.limits.map(fmt).join(" · ");
-  const head = `${spec.symbol} ${spec.side.toUpperCase()} @ ${fmt(spec.entry)}`;
+  const sym = spec.symbol.replace(/USDT$/, "");
+  const head = `${sym} ${spec.side} @ ${fmt(spec.entry)}`;
+  const levels = `Your levels: ${spec.limits.length > 0 ? `adds at ${spec.limits.map(fmt).join(" · ")} · ` : ""}stop ${fmt(spec.stop)}`;
 
   if (hits.length === 0) {
-    const near = nearest
-      ? `nearest level: ${nearest.label} ${fmt(nearest.level)} (${pct(Math.abs(nearest.distPct))} away, ${nearest.heading})`
-      : "no levels configured";
-    return `${head}\nPrice ${fmt(price)} — quiet, nothing in play.\n${near}`;
+    const near = nearest ? `Nearest: your ${nearest.label} at ${fmt(nearest.level)}, ${pct(Math.abs(nearest.distPct))} away.` : "No levels set.";
+    return `${head}\nPrice ${fmt(price)} — quiet. ${near}`;
   }
 
   const top = hits[0]!;
   const approachingStop = top.label === "stop" && top.heading === "toward";
   const side = top.distPct >= 0 ? "above" : "below";
-  const dirWord = mom.dir === "up" ? "climbing" : mom.dir === "down" ? "dropping" : "flat";
+  const dirWord = mom.dir === "up" ? "rising" : mom.dir === "down" ? "falling" : "steady";
   const icon = top.label === "stop" ? "⚠️" : top.heading === "toward" ? "🎯" : "▫️";
+  const moving = top.heading === "toward" ? ", moving toward it" : top.heading === "away" ? ", moving away" : "";
 
-  const lines = [
+  return [
     `${icon} ${head}`,
-    `Price ${fmt(price)} is ${dirWord} — ${pct(Math.abs(top.distPct))} ${side} your ${top.label} (${fmt(top.level)}), heading ${top.heading}.`,
+    `Price ${fmt(price)} (${dirWord}) is ${pct(Math.abs(top.distPct))} ${side} your ${top.label} at ${fmt(top.level)}${moving}.`,
     leanText(mom, approachingStop),
-    `Ladder behind you: ${ladder || "—"}   |   stop ${fmt(spec.stop)}`,
-  ];
-  return lines.join("\n");
+    levels,
+  ].join("\n");
 }
 
 // ── Profit give-back guard ──────────────────────────────────────────────────
@@ -200,7 +199,8 @@ export function evaluateProfitGuard(
   side: Side,
   prev: ProfitGuardState | null,
   momentumBars = 3,
-  params: ProfitGuardParams = DEFAULT_GUARD_PARAMS
+  params: ProfitGuardParams = DEFAULT_GUARD_PARAMS,
+  symbol = ""
 ): ProfitGuardResult {
   const price = candles[candles.length - 1]?.close ?? 0;
   const fav = favorableMove(price, breakeven, side);
@@ -219,7 +219,7 @@ export function evaluateProfitGuard(
   const fired = armed && adverseMomentum && gaveBack && stillNearProfit;
 
   const state: ProfitGuardState = { breakeven, peakFav, armed };
-  return { state, fired, profitPct: favPct, peakPct, price, body: buildGuardBody(side, breakeven, price, favPct, peakPct, mom) };
+  return { state, fired, profitPct: favPct, peakPct, price, body: buildGuardBody(side, breakeven, price, favPct, peakPct, mom, symbol) };
 }
 
 function buildGuardBody(
@@ -228,13 +228,15 @@ function buildGuardBody(
   price: number,
   favPct: number,
   peakPct: number,
-  mom: Momentum
+  mom: Momentum,
+  symbol = ""
 ): string {
-  const pivot = side === "short" ? "up" : "down";
+  const turn = side === "short" ? "up" : "down";
+  const sym = symbol.replace(/USDT$/, "");
   return [
-    `⏳ Profit fading · ${side.toUpperCase()} · breakeven ${fmt(breakeven)}`,
-    `Peaked at +${pct(peakPct)}, now +${pct(Math.max(0, favPct))} at ${fmt(price)} — momentum just pivoted ${pivot} (${mom.decelerating ? "prior push exhausted" : "accelerating against you"}).`,
-    `It's rolling back toward your breakeven. Lock the win or tighten your stop before it round-trips into a loss.`,
+    `⏳ ${sym ? `${sym} ${side}` : side === "short" ? "Short" : "Long"}: profit slipping`,
+    `Now +${pct(Math.max(0, favPct))} (price ${fmt(price)}), down from +${pct(peakPct)}. Breakeven ${fmt(breakeven)}.`,
+    `Price is turning ${turn}${mom.decelerating ? "" : " fast"}. Take some profit or move your stop closer before it becomes a loss.`,
   ].join("\n");
 }
 
