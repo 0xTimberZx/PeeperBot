@@ -429,3 +429,44 @@ describe("NY open caution", () => {
     expect(quiet.sent[0]!.reason).not.toContain("NY open");
   });
 });
+
+describe("average entry of recent calls", () => {
+  const H = 3_600_000;
+  const now = 100 * H;
+  const mk = (over: Partial<FadeCall>): FadeCall => ({
+    ts: now - H, symbol: "BTCUSDT", lead: "COREUSDT", bet: "UP", barClose: 0, lateSec: 3, signalClose: 0,
+    alertPrice: 64_000, settleAt: 0, holdMin: 30, leadPct: -0.02, ownPct: -0.005, ...over,
+  });
+
+  it("averages this coin's UP calls from the last 24h and compares the price now", async () => {
+    const { recentCallsLine } = await import("./fadeWatch.js");
+    const calls = [
+      mk({ alertPrice: 64_000 }),
+      mk({ alertPrice: 63_000, ts: now - 20 * H }),
+      mk({ alertPrice: 50_000, ts: now - 25 * H }), // older than 24h
+      mk({ alertPrice: 3_000, symbol: "ETHUSDT" }), // other coin
+      mk({ alertPrice: 70_000, bet: "DOWN" }), // other direction
+      mk({ alertPrice: 10_000, rule: "arb15" }), // shadow call, never sent
+    ];
+    expect(recentCallsLine(calls, "BTCUSDT", "UP", 64_135, now)).toBe("Avg UP entry, last 24h: 63,500 (2 calls) · now 64,135, 1.00% higher.");
+    expect(recentCallsLine(calls, "BTCUSDT", "UP", 62_865, now)).toContain("1.00% lower");
+    expect(recentCallsLine(calls, "BTCUSDT", "UP", 63_510, now)).toContain("about the same");
+  });
+
+  it("says when there are none", async () => {
+    const { recentCallsLine } = await import("./fadeWatch.js");
+    expect(recentCallsLine([], "BTCUSDT", "UP", 64_000, now)).toBe("First UP call on BTC in the last 24h.");
+  });
+
+  it("appears on the bet signal, counting only calls before this one", async () => {
+    const { mkdtempSync, writeFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const { tmpdir } = await import("node:os");
+    const dir = mkdtempSync(join(tmpdir(), "faderecent-"));
+    const t = 3 * BAR + 4000;
+    writeFileSync(join(dir, "j.jsonl"), JSON.stringify(mk({ ts: t - 2 * H, alertPrice: 100, barClose: -1 })) + "\n");
+    const { w, sent } = watcher({ COREUSDT: candles([100, 100, 98]), BTCUSDT: candles([100, 100, 99.5]) }, { journalPath: join(dir, "j.jsonl") });
+    await w.tick(t);
+    expect(sent[0]!.reason).toContain("Avg UP entry, last 24h: 100 (1 call) · now 99.5, 0.50% lower.");
+  });
+});

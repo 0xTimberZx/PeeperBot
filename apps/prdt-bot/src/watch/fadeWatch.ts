@@ -138,6 +138,21 @@ export function inNyOpenWindow(ts: number): boolean {
 export const NY_OPEN_CAUTION =
   "⚠️ NY open (09:00–10:30 ET): no real edge at this hour in testing (53% won vs 57% other times) — moves here tend to keep going. Skip or bet smaller.";
 
+/**
+ * The average entry price of this coin's calls in the same direction over the
+ * last 24 hours (before `now`), next to the current price — so you can see if
+ * this entry is higher or lower than the bot's recent calls.
+ */
+export function recentCallsLine(calls: readonly FadeCall[], symbol: string, bet: Dir, price: number, now: number): string {
+  const sym = symbol.replace(/USDT$/, "");
+  const recent = calls.filter((c) => c.symbol === symbol && c.bet === bet && c.rule === undefined && c.ts < now && now - c.ts <= 86_400_000 && c.alertPrice > 0);
+  if (recent.length === 0) return `First ${bet} call on ${sym} in the last 24h.`;
+  const avg = recent.reduce((a, c) => a + c.alertPrice, 0) / recent.length;
+  const vs = price / avg - 1;
+  const where = Math.abs(vs) < 0.0005 ? "about the same" : `${Math.abs(vs * 100).toFixed(2)}% ${vs > 0 ? "higher" : "lower"}`;
+  return `Avg ${bet} entry, last 24h: ${fmtPrice(avg)} (${recent.length} call${recent.length === 1 ? "" : "s"}) · now ${fmtPrice(price)}, ${where}.`;
+}
+
 /** Did the confirm symbol join the move (same direction as the target, by at least `joinPct`)? */
 export function confirmJoined(call: Pick<FadeCall, "bet" | "confirm">, joinPct: number): boolean | null {
   const pct = call.confirm?.pct;
@@ -635,6 +650,7 @@ export class FadeWatcher {
       const winMin = Math.round((this.cfg.params.windowBars * this.barMs) / 60_000);
       const bt = this.cfg.backtest[symbol];
       const tag = (x: string): string => x.replace(/USDT$/, "");
+      const recentLine = this.journal === null ? null : recentCallsLine(this.journal.readAll(), symbol, sig.bet, alertPrice, now);
       const what = sig.bet === "UP" ? "drops" : "pumps";
       const did = sig.bet === "UP" ? "bounced" : "pulled back";
       const alert: Alert = {
@@ -649,6 +665,7 @@ export class FadeWatcher {
           (bt === undefined
             ? `Joint ${what} like this tend to reverse.\n`
             : `Joint ${what} like this ${did} ${(bt * 100).toFixed(0)}% of the time in testing (${(this.cfg.breakeven * 100).toFixed(1)}% needed to profit).\n`) +
+          (recentLine === null ? "" : `${recentLine}\n`) +
           stageLine(reading, this.cfg.confidence) +
           (this.cfg.nyOpenCaution && inNyOpenWindow(now) ? `\n${NY_OPEN_CAUTION}` : ""),
         strategy: "fade-watch",
