@@ -50,8 +50,8 @@ describe("imbalance watch", () => {
     const ch = new Capture();
     const w = new ImbalanceWatcher(cfg, new AlertDispatcher([ch]), market(now));
     const text = await w.scan(now);
-    expect(text).toContain("BTCUSDT descending fast into a 4h bullish imbalance 100–102");
-    expect(text).toContain("End of the imbalance: 100");
+    expect(text).toContain("BTC falling fast toward an unfilled 4h gap 100–102");
+    expect(text).toContain("far end 100");
     expect(ch.sent).toHaveLength(1);
     expect(await w.scan(now + 23 * HOUR)).toBeNull(); // cap
     // After the cap, the same gap is still never announced twice.
@@ -86,8 +86,8 @@ describe("fade call going against you", () => {
     const { w, ch } = setup(99);
     expect(await w.warnAgainst(1_500_000, { BTCUSDT: 99.6 })).toBe(1);
     const text = ch.sent[0]!.reason;
-    expect(text).toContain("BTCUSDT UP call going against you: -0.40% since the alert");
-    expect(text).toContain("End of the imbalance: 99");
+    expect(text).toContain("BTC UP bet losing: −0.4% (100 → 99.6)");
+    expect(text).toContain("stall by its far end, 99");
     expect(await w.warnAgainst(1_600_000, { BTCUSDT: 99.5 })).toBe(0); // once per call
   });
 
@@ -100,6 +100,6 @@ describe("fade call going against you", () => {
   it("says so when no imbalance is within reach", async () => {
     const { w, ch } = setup(null);
     await w.warnAgainst(1_500_000, { BTCUSDT: 99.5 });
-    expect(ch.sent[0]!.reason).toContain("No unfilled 4h or daily imbalance within reach below");
+    expect(ch.sent[0]!.reason).toContain("No unfilled price gap within reach below");
   });
 });

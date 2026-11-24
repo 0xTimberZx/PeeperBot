@@ -42,6 +42,7 @@ import { AaveHealthMonitor, aaveConfigFrom } from "./watch/aaveHealthRun.js";
 import { FadeOutcomeLog, TelegramInbox, callKey, formatRecord, latestOutcomes, withAutoMissed, yourRecord } from "./watch/fadeReplies.js";
 import { ImbalanceWatcher, imbalanceConfigFromEnv } from "./watch/imbalanceWatch.js";
 import { describeGap, describeStats, fmtPrice } from "./analysis/imbalance.js";
+import { analyzeBand, formatBand, DEFAULT_BAND_PARAMS, type BandParams } from "./analysis/band.js";
 import { FadeReviewLog } from "./watch/fadeReview.js";
 import {
   readStage, SandwichLog, sandwichOutcome, stageLine, summarizeSandwiches,
@@ -610,7 +611,7 @@ async function cmdPosWatch(flags: Map<string, string>): Promise<void> {
     const st = loadPosState(statePath);
 
     const res = evaluatePosition(candles, spec, 3);
-    const guard = evaluateProfitGuard(candles, breakeven, spec.side, st.guard, 3, guardParams);
+    const guard = evaluateProfitGuard(candles, breakeven, spec.side, st.guard, 3, guardParams, spec.symbol);
 
     // Combined per-label latch: approach levels heading toward, plus a synthetic
     // "profit-guard" label when the give-back fires. Alert only on NEW labels.
@@ -650,7 +651,7 @@ async function cmdPosWatch(flags: Map<string, string>): Promise<void> {
     try {
       const candles = await fetchKlines({ symbol: spec.symbol, interval, limit: 60 });
       const res = evaluatePosition(candles, spec, 3);
-      const guard = evaluateProfitGuard(candles, breakeven, spec.side, guardState, 3, guardParams);
+      const guard = evaluateProfitGuard(candles, breakeven, spec.side, guardState, 3, guardParams, spec.symbol);
       guardState = guard.state;
 
       if (res.triggered && !latched) {
@@ -799,7 +800,7 @@ async function cmdFadeWatch(flags: Map<string, string>): Promise<void> {
       direction: "UP",
       confidence: 0.56,
       entryPrice: 0,
-      reason: "TEST — this is what a fade alert looks like. No setup is live; do not trade this.",
+      reason: "TEST — a sample bet signal to check delivery. Nothing is live; don't bet on this.",
       strategy: "fade-watch",
       live: false,
       ts: Date.now(),
@@ -1150,6 +1151,59 @@ async function cmdAave(flags: Map<string, string>): Promise<void> {
   await monitor.start(Number(flags.get("interval") ?? 5), forMin === undefined ? undefined : Number(forMin));
 }
 
+/**
+ * 24h band test: does the closer, retested edge of the last 24h range pick the
+ * trade? A = as a filter on fade calls, B = as a strategy on its own.
+ */
+async function cmdBand(flags: Map<string, string>): Promise<void> {
+  const cfg = loadConfig();
+  const lead = (flags.get("lead") ?? cfg.signalSymbol ?? "COREUSDT").toUpperCase();
+  const targets = (flags.get("target") ?? "BTCUSDT,ETHUSDT").toUpperCase().split(",").filter((x) => x.length > 0);
+  const days = Number(flags.get("days") ?? 540);
+  const count = Math.ceil((days * 1440) / 5);
+  const breakeven = 1 / cfg.payout;
+  const params: BandParams = {
+    ...DEFAULT_BAND_PARAMS,
+    lookbackBars: Math.round((Number(flags.get("hours") ?? 24) * 60) / 5),
+    prox: Number(flags.get("prox") ?? DEFAULT_BAND_PARAMS.prox),
+    tol: Number(flags.get("tol") ?? DEFAULT_BAND_PARAMS.tol * 100) / 100,
+    minGapBars: Math.max(1, Math.round(Number(flags.get("gap") ?? 30) / 5)),
+    holdBars: Math.max(1, Math.round(Number(flags.get("hold") ?? 30) / 5)),
+  };
+  // Section A scores fade calls with the fade params' own hold — give it the same --hold as section B.
+  const fadeParams: FadeParams = { ...DEFAULT_FADE_PARAMS, holdBars: params.holdBars };
+  const end = Date.now() - Number(flags.get("skip-days") ?? 0) * 86_400_000;
+  console.error(`[band] fetching ${count} × 5m bars each for ${[lead, ...targets].join(", ")}…`);
+  const series: Candle[][] = [];
+  for (const symbol of [lead, ...targets]) series.push(await fetchHistory({ symbol, interval: "5m", count, endTime: end }));
+  const [leadCandles, ...targetCandles] = series;
+  const proxes = (flags.get("prox-sweep") ?? "0.1,0.2,0.3").split(",").map(Number).filter((x) => x > 0);
+  const tols = (flags.get("tol-sweep") ?? "0.1,0.2,0.4").split(",").map(Number).filter((x) => x > 0);
+  const cell = (b: { n: number; winRate: number; wilsonLow: number }): string =>
+    b.n === 0 ? "—".padStart(26) : `${(b.winRate * 100).toFixed(1)}% (n=${b.n}, ${(b.wilsonLow * 100).toFixed(1)}%)`.padStart(26);
+  const out = targets.map((target, k) => {
+    const report = analyzeBand(leadCandles!, targetCandles[k]!, params, fadeParams);
+    console.log("\n" + formatBand(report, { lead, target, breakeven }));
+    // Sensitivity: a result that only shows at one hand-picked setting is a fitted number.
+    const sweep: { prox: number; tolPct: number; fade: unknown; solo: unknown }[] = [];
+    console.log(`\n${target} sensitivity (win rate, n, 95% floor) — breakeven ${(breakeven * 100).toFixed(1)}%`);
+    console.log(`  ${"near / tol".padEnd(14)}${"A: fade at retested low".padStart(26)}${"B: band rule alone".padStart(26)}`);
+    for (const prox of proxes) {
+      for (const tolPct of tols) {
+        const r = analyzeBand(leadCandles!, targetCandles[k]!, { ...params, prox, tol: tolPct / 100 }, fadeParams);
+        sweep.push({ prox, tolPct, fade: r.fade.retestedLow, solo: r.standalone.all });
+        console.log(`  ${`${prox * 100}% / ${tolPct}%`.padEnd(14)}${cell(r.fade.retestedLow)}${cell(r.standalone.all)}`);
+      }
+    }
+    return { target, report, sweep };
+  });
+  if (flags.get("json") === "true") {
+    console.log("----- COPY BELOW (JSON) -----");
+    console.log(JSON.stringify({ lead, days, breakeven, generated: new Date(end).toISOString(), results: out }));
+    console.log("----- COPY ABOVE -----\n");
+  }
+}
+
 function tradesPath(flags: Map<string, string>): string {
   return flags.get("journal") ?? process.env.PRDT_TRADES_PATH ?? "./data/prdt-trades.jsonl";
 }
@@ -1455,6 +1509,9 @@ async function main(): Promise<void> {
     case "imbalance":
       await cmdImbalance(flags);
       break;
+    case "band":
+      await cmdBand(flags);
+      break;
     case "pivotfollow":
       await cmdPivotFollow(flags);
       break;
@@ -1507,6 +1564,8 @@ async function main(): Promise<void> {
           `  peeperbot fade      [--lead COREUSDT] [--target BTCUSDT,ETHUSDT] [--days 180] [--side dump|pump|both]\n` +
           `                     #   [--window 30] [--hold 30] [--lead-move 1.5] [--own-move 0.15] [--skip-days 0]\n` +
           `                     # backtest: lead + major dumped together → bet the major bounces\n` +
+          `  peeperbot band     [--days 540] [--prox 0.2] [--tol 0.2] [--hours 24] [--hold 30]\n` +
+          `                     # does the closer, retested 24h band edge pick the trade? (filter on fades + standalone)\n` +
           `  peeperbot imbalance [--status | --once | --test] [--target BTCUSDT,ETHUSDT]\n` +
           `                     # 4h/daily imbalance callout (max one per 24h; also runs inside fadewatch)\n` +
           `  peeperbot aave     --address 0x… [--chain arbitrum,base] [--status | --once | --test] [--interval 5]\n` +

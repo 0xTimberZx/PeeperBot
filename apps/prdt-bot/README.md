@@ -569,6 +569,12 @@ npm run bot:fadewatch -- --report   # score every past alert against price
   ETH 57.3%, BTC 56.3%, above breakeven in all three periods — but it was found
   by slicing results after looking, which is why it starts in shadow.
   `FADE_SHADOW=off` disables shadow rules.
+- **Average entry of recent calls**: every bet signal shows the average entry
+  price of the bot's calls on that coin in the same direction over the last
+  24 hours, and how the price now compares — e.g. "Avg UP entry, last 24h:
+  64,350 (2 calls) · now 64,210, 0.22% lower" — so you can see whether this
+  entry is higher or lower than recent calls. Shadow (never-sent) calls are
+  left out.
 - **NY open caution**: an alert fired 09:00–10:30 New York time on a weekday
   ends with a warning to consider skipping it or betting smaller. In the
   540-day backtest the rule won only 52.7% in that window (165 trades; 42 /

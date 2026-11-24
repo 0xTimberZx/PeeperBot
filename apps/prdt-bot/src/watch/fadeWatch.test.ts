@@ -85,7 +85,7 @@ describe("FadeWatcher", () => {
     expect(await w.tick(3 * BAR + 4000)).toBe(true);
     expect(sent).toHaveLength(1);
     expect(sent[0]).toMatchObject({ symbol: "BTCUSDT", direction: "UP", timeframeMin: 10, strategy: "fade-watch" });
-    expect(sent[0]!.reason).toContain("4s after the bar close");
+    expect(sent[0]!.reason).toContain("sent 4s after the 5m close");
     await w.tick(3 * BAR + 8000);
     expect(sent).toHaveLength(1);
   });
@@ -199,10 +199,10 @@ describe("FadeWatcher reviews", () => {
     expect(await w.reviewSettled(call.settleAt + 400_000)).toBe(0); // only once
     expect(replies).toHaveLength(1);
     expect(replies[0]!.to).toBe(77);
-    expect(replies[0]!.text).toContain("BTCUSDT UP from");
-    expect(replies[0]!.text).toContain("LOST — complete blowout");
+    expect(replies[0]!.text).toContain("BTC UP from");
+    expect(replies[0]!.text).toContain("❌ LOST badly");
     expect(replies[0]!.text).toContain("CORE kept falling");
-    expect(replies[0]!.text).toContain("Blowouts were 5.1% of backtest trades");
+    expect(replies[0]!.text).toContain("About 1 in 20 bets ends like this");
     expect(JSON.parse(readFileSync(join(dir, "r.jsonl"), "utf8").trim())).toMatchObject({ symbol: "BTCUSDT", grade: "blowout" });
   });
 });
@@ -322,14 +322,14 @@ describe("FadeWatcher confidence and the dip sandwich", () => {
     expect(r).toMatchObject({ stage: "confident", wins: 29 });
     expect(sent).toHaveLength(1);
     expect(sent[0]).toMatchObject({ strategy: "fade-confidence", kind: "info" });
-    expect(sent[0]!.reason).toContain("now CONFIDENT");
+    expect(sent[0]!.reason).toContain("now in confident mode");
     expect(await w.updateStage(T0 + 4 * MIN)).toMatchObject({ stage: "confident" });
     expect(sent).toHaveLength(1); // no repeat while the stage holds
 
     expect(await w.checkSandwiches(T0 + 5 * MIN)).toBe(1);
     expect(sent).toHaveLength(2);
     expect(sent[1]).toMatchObject({ strategy: "fade-sandwich", direction: "UP", entryPrice: 99.75 });
-    expect(sent[1]!.reason).toContain(`settle at ${new Date(call.settleAt).toISOString().slice(11, 16)} UTC — 25 min`);
+    expect(sent[1]!.reason).toContain(`settle ${new Date(call.settleAt).toISOString().slice(11, 16)} UTC (25 min)`);
     expect((await log())[0]).toMatchObject({ stage: "confident", sent: true });
   });
 
@@ -338,7 +338,7 @@ describe("FadeWatcher confidence and the dip sandwich", () => {
     expect(w.confidence()).toMatchObject({ stage: "skeptical", settled: 20 });
     const { w: w2, sent } = watcher({ COREUSDT: candles([100, 100, 98]), BTCUSDT: candles([100, 100, 99.5]) });
     await w2.tick(3 * BAR + 4000);
-    expect(sent[0]!.reason).toContain("Mode: SKEPTICAL — single bet only (0 of 50 calls settled");
+    expect(sent[0]!.reason).toContain("Mode: skeptical — single bets only until 50 results are in (0 so far)");
   });
 });
 
@@ -419,7 +419,7 @@ describe("NY open caution", () => {
     const series = { COREUSDT: shift(candles([100, 100, 98])), BTCUSDT: shift(candles([100, 100, 99.5])) };
     const on = watcher(series, { nyOpenCaution: true });
     await on.w.tick(base + 3 * BAR + 4000);
-    expect(on.sent[0]!.reason).toContain("⚠️ NY open (09:00–10:30 ET)");
+    expect(on.sent[0]!.reason).toContain("⚠️ NY open (09:00–10:30 ET): no real edge");
     const off = watcher(series, { nyOpenCaution: false });
     await off.w.tick(base + 3 * BAR + 4000);
     expect(off.sent[0]!.reason).not.toContain("NY open");
@@ -427,5 +427,46 @@ describe("NY open caution", () => {
     const quiet = watcher({ COREUSDT: candles([100, 100, 98]), BTCUSDT: candles([100, 100, 99.5]) }, { nyOpenCaution: true });
     await quiet.w.tick(3 * BAR + 4000); // 1970-01-01 00:15 UTC, a Thursday evening in New York
     expect(quiet.sent[0]!.reason).not.toContain("NY open");
+  });
+});
+
+describe("average entry of recent calls", () => {
+  const H = 3_600_000;
+  const now = 100 * H;
+  const mk = (over: Partial<FadeCall>): FadeCall => ({
+    ts: now - H, symbol: "BTCUSDT", lead: "COREUSDT", bet: "UP", barClose: 0, lateSec: 3, signalClose: 0,
+    alertPrice: 64_000, settleAt: 0, holdMin: 30, leadPct: -0.02, ownPct: -0.005, ...over,
+  });
+
+  it("averages this coin's UP calls from the last 24h and compares the price now", async () => {
+    const { recentCallsLine } = await import("./fadeWatch.js");
+    const calls = [
+      mk({ alertPrice: 64_000 }),
+      mk({ alertPrice: 63_000, ts: now - 20 * H }),
+      mk({ alertPrice: 50_000, ts: now - 25 * H }), // older than 24h
+      mk({ alertPrice: 3_000, symbol: "ETHUSDT" }), // other coin
+      mk({ alertPrice: 70_000, bet: "DOWN" }), // other direction
+      mk({ alertPrice: 10_000, rule: "arb15" }), // shadow call, never sent
+    ];
+    expect(recentCallsLine(calls, "BTCUSDT", "UP", 64_135, now)).toBe("Avg UP entry, last 24h: 63,500 (2 calls) · now 64,135, 1.00% higher.");
+    expect(recentCallsLine(calls, "BTCUSDT", "UP", 62_865, now)).toContain("1.00% lower");
+    expect(recentCallsLine(calls, "BTCUSDT", "UP", 63_510, now)).toContain("about the same");
+  });
+
+  it("says when there are none", async () => {
+    const { recentCallsLine } = await import("./fadeWatch.js");
+    expect(recentCallsLine([], "BTCUSDT", "UP", 64_000, now)).toBe("First UP call on BTC in the last 24h.");
+  });
+
+  it("appears on the bet signal, counting only calls before this one", async () => {
+    const { mkdtempSync, writeFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const { tmpdir } = await import("node:os");
+    const dir = mkdtempSync(join(tmpdir(), "faderecent-"));
+    const t = 3 * BAR + 4000;
+    writeFileSync(join(dir, "j.jsonl"), JSON.stringify(mk({ ts: t - 2 * H, alertPrice: 100, barClose: -1 })) + "\n");
+    const { w, sent } = watcher({ COREUSDT: candles([100, 100, 98]), BTCUSDT: candles([100, 100, 99.5]) }, { journalPath: join(dir, "j.jsonl") });
+    await w.tick(t);
+    expect(sent[0]!.reason).toContain("Avg UP entry, last 24h: 100 (1 call) · now 99.5, 0.50% lower.");
   });
 });

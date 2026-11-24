@@ -96,10 +96,10 @@ describe("detecting a fast move into a fresh gap", () => {
   it("formats the callout with the end, the odds and the cap", () => {
     const a = detectApproach([bull], 101.6, 104, 2, P)!;
     const text = formatApproach("BTCUSDT", a, { tf: "4h", n: 10, reachedHalf: 7, reachedEnd: 4, horizonBars: 6 });
-    expect(text).toContain("descending fast into a 4h bullish imbalance 100–102");
-    expect(text).toContain("End of the imbalance: 100");
-    expect(text).toContain("4 of 10 reached the end (40%) within 24h");
-    expect(text).toContain("no sooner than 24h");
+    expect(text).toContain("falling fast toward an unfilled 4h gap 100–102");
+    expect(text).toContain("far end 100");
+    expect(text).toContain("4 of 10 the far end, within 24h");
+    expect(text).toContain("At most one of these a day");
   });
 });
 

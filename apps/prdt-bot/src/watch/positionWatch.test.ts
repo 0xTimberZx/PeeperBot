@@ -44,7 +44,7 @@ describe("evaluatePosition", () => {
     const res = evaluatePosition(candles, spec, 1);
     expect(res.triggered).toBe(true);
     expect(res.hits[0]?.label).toBe("entry");
-    expect(res.body).toContain("BTCUSDT SHORT");
+    expect(res.body).toContain("BTC short");
   });
 
   it("does not trigger when price is far from every level", () => {
@@ -67,17 +67,17 @@ describe("evaluatePosition", () => {
 
 describe("leanText", () => {
   it("calls a fading non-stop approach a reversion", () => {
-    expect(leanText({ recent: 0.001, prior: 0.004, decelerating: true, dir: "up" }, false)).toContain("reversion");
+    expect(leanText({ recent: 0.001, prior: 0.004, decelerating: true, dir: "up" }, false)).toContain("more likely to stall or reverse");
   });
   it("warns on an accelerating approach into the stop", () => {
-    expect(leanText({ recent: 0.004, prior: 0.001, decelerating: false, dir: "up" }, true)).toContain("mind the invalidation");
+    expect(leanText({ recent: 0.004, prior: 0.001, decelerating: false, dir: "up" }, true)).toContain("Speeding up into your stop");
   });
 });
 
 describe("sampleBody", () => {
   it("produces a delivery-test alert from the spec", () => {
     const body = sampleBody(spec);
-    expect(body).toContain("BTCUSDT SHORT @ 64,487");
+    expect(body).toContain("BTC short @ 64,487");
     expect(body).toContain("Delivery test");
   });
 });
@@ -106,7 +106,9 @@ describe("profit give-back guard", () => {
     const candles = [c(64100), c(64180), c(64260), c(64300)]; // climbing back = adverse
     const r = evaluateProfitGuard(candles, be, "short", prev, 1, guardParams);
     expect(r.fired).toBe(true);
-    expect(r.body).toContain("Profit fading");
+    expect(r.body).toContain("profit slipping");
+    expect(r.body).toContain("from your avg entry");
+    expect(r.body).not.toContain("reakeven");
   });
 
   it("does NOT fire while the winner is still running (favorable momentum)", () => {
