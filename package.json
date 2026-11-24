@@ -25,6 +25,7 @@
     "bot:fadewatch": "npm run fadewatch --workspace=apps/prdt-bot --",
     "bot:aave": "npm run aave --workspace=apps/prdt-bot --",
     "bot:imbalance": "npm run imbalance --workspace=apps/prdt-bot --",
+    "bot:band": "npm run band --workspace=apps/prdt-bot --",
     "bot:log": "npm run log --workspace=apps/prdt-bot --",
     "bot:autopsy": "npm run autopsy --workspace=apps/prdt-bot --",
     "bot:follow": "npm run follow --workspace=apps/prdt-bot --",

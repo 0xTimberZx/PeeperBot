@@ -26,6 +26,7 @@
     "fadewatch": "tsx src/cli.ts fadewatch",
     "aave": "tsx src/cli.ts aave",
     "imbalance": "tsx src/cli.ts imbalance",
+    "band": "tsx src/cli.ts band",
     "log": "tsx src/cli.ts log",
     "autopsy": "tsx src/cli.ts autopsy",
     "follow": "tsx src/cli.ts follow",
