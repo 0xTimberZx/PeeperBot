@@ -117,6 +117,28 @@ export function confirmMove(candles: readonly Candle[] | null, barClose: number,
   return end.close / start.close - 1;
 }
 
+const NY_TIME = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour12: false, hour: "2-digit", minute: "2-digit", weekday: "short" });
+
+/**
+ * True during the NY stock open window, 09:00–10:30 New York time on weekdays
+ * (DST handled by the time zone). US market holidays are not excluded.
+ *
+ * Backtest (540 days, live rule, BTC+ETH): alerts in this window won 52.7%
+ * (n=165; 42.4 / 66.2 / 43.8% by period) — breakeven — against 57.1% at other
+ * times. Explosive moves at the open tend to keep going rather than snap back.
+ * 08:00–09:00 ET (US data) did well (63.8%, n=58), so it is not included.
+ */
+export function inNyOpenWindow(ts: number): boolean {
+  const p = Object.fromEntries(NY_TIME.formatToParts(new Date(ts)).map((x) => [x.type, x.value]));
+  if (p["weekday"] === "Sat" || p["weekday"] === "Sun") return false;
+  const m = (Number(p["hour"]) % 24) * 60 + Number(p["minute"]);
+  return m >= 540 && m < 630;
+}
+
+export const NY_OPEN_CAUTION =
+  "⚠️ NY open (09:00–10:30 ET): this alert has been only breakeven here — 52.7% over 165 backtest trades (42 / 66 / 44% by period) " +
+  "vs 57% at other times. Moves at the open tend to keep going. Consider skipping it or betting smaller.";
+
 /** Did the confirm symbol join the move (same direction as the target, by at least `joinPct`)? */
 export function confirmJoined(call: Pick<FadeCall, "bet" | "confirm">, joinPct: number): boolean | null {
   const pct = call.confirm?.pct;
@@ -244,6 +266,8 @@ export interface FadeWatchConfig {
   sandwichesPath: string | null;
   /** Peeper 1.02: recorded on each alert, never filters. Null = off. */
   confirm: ConfirmCheck | null;
+  /** Add the NY open caution to alerts (and sandwiches) fired 09:00–10:30 ET. */
+  nyOpenCaution: boolean;
 }
 
 /** What the fade watch needs from the imbalance watch to explain a call going against you. */
@@ -382,7 +406,9 @@ export class FadeWatcher {
         continue;
       }
       console.log(`[fadewatch] ${call.symbol}: sandwich setup (${(against * 100).toFixed(2)}% against) — alert sent`);
-      const text = sandwichMessage(rec, { pay: 1 / this.cfg.breakeven });
+      const text =
+        sandwichMessage(rec, { pay: 1 / this.cfg.breakeven }) +
+        (this.cfg.nyOpenCaution && inNyOpenWindow(now) ? `\n⚠️ NY open (09:00–10:30 ET): moves here tend to keep going — a second bet doubles the risk.` : "");
       try {
         if (this.inbox !== null && call.telegramMessageId !== undefined) await this.inbox.reply(call.telegramMessageId, text);
         else
@@ -619,7 +645,8 @@ export class FadeWatcher {
           `Bet ${sig.bet} for ${holdMin}m · settles ~${hhmm(now + holdMs)} UTC · 5m close was ${sig.signalClose}\n` +
           `Alert is ${lateSec}s after the bar close. Enter now or skip: 5m late is roughly breakeven.\n` +
           (bt === undefined ? "" : `Backtest ${(bt * 100).toFixed(1)}% over 540d vs ${(this.cfg.breakeven * 100).toFixed(1)}% breakeven.\n`) +
-          stageLine(reading, this.cfg.confidence),
+          stageLine(reading, this.cfg.confidence) +
+          (this.cfg.nyOpenCaution && inNyOpenWindow(now) ? `\n${NY_OPEN_CAUTION}` : ""),
         strategy: "fade-watch",
         live: false,
         ts: now,
@@ -873,6 +900,8 @@ export function fadeWatchConfigFromEnv(opts: { lead: string; breakeven: number }
       withinMin: num("FADE_SANDWICH_WITHIN_MIN", 15),
     },
     sandwichesPath: raw("FADE_SANDWICHES_PATH") ?? "./data/fade-sandwiches.jsonl",
+    // FADE_NY_CAUTION=off removes the NY open caution line.
+    nyOpenCaution: (raw("FADE_NY_CAUTION") ?? "on").toLowerCase() !== "off",
     // Peeper 1.02. FADE_CONFIRM=off disables it.
     confirm:
       (raw("FADE_CONFIRM") ?? "on").toLowerCase() === "off"
