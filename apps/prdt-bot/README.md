@@ -569,6 +569,14 @@ npm run bot:fadewatch -- --report   # score every past alert against price
   ETH 57.3%, BTC 56.3%, above breakeven in all three periods — but it was found
   by slicing results after looking, which is why it starts in shadow.
   `FADE_SHADOW=off` disables shadow rules.
+- **NY open caution**: an alert fired 09:00–10:30 New York time on a weekday
+  ends with a warning to consider skipping it or betting smaller. In the
+  540-day backtest the rule won only 52.7% in that window (165 trades; 42 /
+  66 / 44% by period) — breakeven — against 57.1% at other times: explosive
+  moves at the stock open tend to keep going. The 08:00–09:00 ET data hour
+  did well (63.8%) and is not flagged. Sandwich alerts in the window get a
+  shorter warning. `--report` shows the live record in and out of the window.
+  `FADE_NY_CAUTION=off` removes it. US market holidays are not excluded.
 - **MSTR confirm — Peeper 1.02**: every alert also records how MSTR moved
   over the same 30m window (OKX's MSTR perpetual; the feed falls back to the
   perpetual for symbols with no spot market). `--report` splits the live

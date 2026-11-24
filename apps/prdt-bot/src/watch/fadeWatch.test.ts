@@ -42,7 +42,7 @@ function watcher(series: Record<string, Candle[]>, over: Partial<FadeWatchConfig
     backtest: { BTCUSDT: 0.564 },
     breakeven: 0.526,
     shadowRules: [],
-    shadowJournalPath: null, confidence: { window: 50, minSettled: 50, upAt: 0.55, downBelow: 0.526 }, sandwich: { enabled: false, dipPct: 0.002, withinMin: 15 }, sandwichesPath: null, confirm: null,
+    shadowJournalPath: null, confidence: { window: 50, minSettled: 50, upAt: 0.55, downBelow: 0.526 }, sandwich: { enabled: false, dipPct: 0.002, withinMin: 15 }, sandwichesPath: null, confirm: null, nyOpenCaution: false,
     autoMissAfterMin: 120, againstPct: 0,
     ...over,
   };
@@ -95,7 +95,7 @@ describe("FadeWatcher", () => {
     const ch = new Capture();
     let n = 3;
     const w = new FadeWatcher(
-      { lead: "COREUSDT", targets: ["BTCUSDT"], interval: "5m", params: P, maxLateSec: 120, wakeOffsetSec: 3, statePath: null, journalPath: null, outcomesPath: null, reviewsPath: null, backtestBlowoutRate: {}, backtest: {}, breakeven: 0.526, shadowRules: [], shadowJournalPath: null, confidence: { window: 50, minSettled: 50, upAt: 0.55, downBelow: 0.526 }, sandwich: { enabled: false, dipPct: 0.002, withinMin: 15 }, sandwichesPath: null, confirm: null },
+      { lead: "COREUSDT", targets: ["BTCUSDT"], interval: "5m", params: P, maxLateSec: 120, wakeOffsetSec: 3, statePath: null, journalPath: null, outcomesPath: null, reviewsPath: null, backtestBlowoutRate: {}, backtest: {}, breakeven: 0.526, shadowRules: [], shadowJournalPath: null, confidence: { window: 50, minSettled: 50, upAt: 0.55, downBelow: 0.526 }, sandwich: { enabled: false, dipPct: 0.002, withinMin: 15 }, sandwichesPath: null, confirm: null, nyOpenCaution: false },
       new AlertDispatcher([ch]),
       async (symbol) => s[symbol as keyof typeof s].slice(0, n)
     );
@@ -148,7 +148,7 @@ describe("FadeWatcher replies", () => {
     const series = { COREUSDT: candles([100, 100, 98]), BTCUSDT: candles([100, 100, 99.5]) };
     const w = new FadeWatcher(
       { lead: "COREUSDT", targets: ["BTCUSDT"], interval: "5m", params: P, maxLateSec: 120, wakeOffsetSec: 3, statePath: null,
-        journalPath: join(dir, "j.jsonl"), outcomesPath: join(dir, "o.jsonl"), reviewsPath: null, backtestBlowoutRate: {}, backtest: {}, breakeven: 0.526, shadowRules: [], shadowJournalPath: null, confidence: { window: 50, minSettled: 50, upAt: 0.55, downBelow: 0.526 }, sandwich: { enabled: false, dipPct: 0.002, withinMin: 15 }, sandwichesPath: null, confirm: null },
+        journalPath: join(dir, "j.jsonl"), outcomesPath: join(dir, "o.jsonl"), reviewsPath: null, backtestBlowoutRate: {}, backtest: {}, breakeven: 0.526, shadowRules: [], shadowJournalPath: null, confidence: { window: 50, minSettled: 50, upAt: 0.55, downBelow: 0.526 }, sandwich: { enabled: false, dipPct: 0.002, withinMin: 15 }, sandwichesPath: null, confirm: null, nyOpenCaution: false },
       new AlertDispatcher([new FakeTelegram()]),
       async (symbol) => series[symbol as keyof typeof series]
     );
@@ -189,7 +189,7 @@ describe("FadeWatcher reviews", () => {
     const w = new FadeWatcher(
       { lead: "COREUSDT", targets: ["BTCUSDT"], interval: "5m", params: { ...P, leadMovePct: 0.015 }, maxLateSec: 120, wakeOffsetSec: 3,
         statePath: null, journalPath: join(dir, "j.jsonl"), outcomesPath: join(dir, "o.jsonl"), reviewsPath: join(dir, "r.jsonl"),
-        backtestBlowoutRate: { BTCUSDT: 0.051 }, backtest: {}, breakeven: 0.526, shadowRules: [], shadowJournalPath: null, confidence: { window: 50, minSettled: 50, upAt: 0.55, downBelow: 0.526 }, sandwich: { enabled: false, dipPct: 0.002, withinMin: 15 }, sandwichesPath: null, confirm: null },
+        backtestBlowoutRate: { BTCUSDT: 0.051 }, backtest: {}, breakeven: 0.526, shadowRules: [], shadowJournalPath: null, confidence: { window: 50, minSettled: 50, upAt: 0.55, downBelow: 0.526 }, sandwich: { enabled: false, dipPct: 0.002, withinMin: 15 }, sandwichesPath: null, confirm: null, nyOpenCaution: false },
       new AlertDispatcher([]),
       fetch,
       inbox as never
@@ -221,7 +221,7 @@ describe("FadeWatcher shadow rules", () => {
     const w = new FadeWatcher(
       { lead: "COREUSDT", targets: ["BTCUSDT"], interval: "5m", params: P, maxLateSec: 120, wakeOffsetSec: 3, statePath: null,
         journalPath: join(dir, "j.jsonl"), outcomesPath: null, reviewsPath: null, backtestBlowoutRate: {}, backtest: {}, breakeven: 0.526, autoMissAfterMin: 120, againstPct: 0.003,
-        shadowRules: [rule], shadowJournalPath: join(dir, "shadow.jsonl"), confidence: { window: 50, minSettled: 50, upAt: 0.55, downBelow: 0.526 }, sandwich: { enabled: false, dipPct: 0.002, withinMin: 15 }, sandwichesPath: null, confirm: null },
+        shadowRules: [rule], shadowJournalPath: join(dir, "shadow.jsonl"), confidence: { window: 50, minSettled: 50, upAt: 0.55, downBelow: 0.526 }, sandwich: { enabled: false, dipPct: 0.002, withinMin: 15 }, sandwichesPath: null, confirm: null, nyOpenCaution: false },
       new AlertDispatcher([ch]),
       async (symbol) => all[symbol as keyof typeof all].slice(0, n)
     );
@@ -239,7 +239,7 @@ describe("FadeWatcher shadow rules", () => {
     const w = new FadeWatcher(
       { lead: "COREUSDT", targets: ["BTCUSDT"], interval: "5m", params: P, maxLateSec: 120, wakeOffsetSec: 3, statePath: null,
         journalPath: null, outcomesPath: null, reviewsPath: null, backtestBlowoutRate: {}, backtest: {}, breakeven: 0.526, autoMissAfterMin: 120, againstPct: 0.003,
-        shadowRules: [], shadowJournalPath: "/nonexistent/should-not-be-written.jsonl", confidence: { window: 50, minSettled: 50, upAt: 0.55, downBelow: 0.526 }, sandwich: { enabled: false, dipPct: 0.002, withinMin: 15 }, sandwichesPath: null, confirm: null },
+        shadowRules: [], shadowJournalPath: "/nonexistent/should-not-be-written.jsonl", confidence: { window: 50, minSettled: 50, upAt: 0.55, downBelow: 0.526 }, sandwich: { enabled: false, dipPct: 0.002, withinMin: 15 }, sandwichesPath: null, confirm: null, nyOpenCaution: false },
       new AlertDispatcher([]),
       async () => { throw new Error("should not fetch"); }
     );
@@ -289,7 +289,7 @@ describe("FadeWatcher confidence and the dip sandwich", () => {
         journalPath: join(dir, "j.jsonl"), outcomesPath: null, reviewsPath: join(dir, "r.jsonl"), backtestBlowoutRate: {}, backtest: {}, breakeven: 0.526,
         autoMissAfterMin: 120, againstPct: 0, shadowRules: [], shadowJournalPath: null,
         confidence: { window: 50, minSettled: 50, upAt: 0.55, downBelow: 0.526 }, sandwich: { enabled: true, dipPct: 0.002, withinMin: 15 },
-        sandwichesPath: join(dir, "sw.jsonl"), confirm: null },
+        sandwichesPath: join(dir, "sw.jsonl"), confirm: null, nyOpenCaution: false },
       new AlertDispatcher([ch]),
       async (_s, interval) => (interval === "1m" ? [{ openTime: 0, open: price, high: price, low: price, close: price, volume: 1, closeTime: 1 }] : [])
     );
@@ -394,5 +394,38 @@ describe("Peeper 1.02 — MSTR confirm", () => {
     expect(await w.tick(3 * BAR + 4000)).toBe(true);
     expect(ch.sent).toHaveLength(1);
     expect(JSON.parse(readFileSync(join(dir, "j.jsonl"), "utf8").trim()).confirm).toEqual({ symbol: "MSTRUSDT", pct: null });
+  });
+});
+
+describe("NY open caution", () => {
+  it("covers 09:00–10:30 New York time on weekdays, across daylight saving", async () => {
+    const { inNyOpenWindow } = await import("./fadeWatch.js");
+    // Tue 2026-11-24 (EST, UTC−5): 09:00 ET = 14:00 UTC.
+    expect(inNyOpenWindow(Date.UTC(2026, 10, 24, 13, 59))).toBe(false);
+    expect(inNyOpenWindow(Date.UTC(2026, 10, 24, 14, 0))).toBe(true);
+    expect(inNyOpenWindow(Date.UTC(2026, 10, 24, 15, 29))).toBe(true);
+    expect(inNyOpenWindow(Date.UTC(2026, 10, 24, 15, 30))).toBe(false);
+    // Tue 2026-07-14 (EDT, UTC−4): 09:00 ET = 13:00 UTC.
+    expect(inNyOpenWindow(Date.UTC(2026, 6, 14, 13, 0))).toBe(true);
+    expect(inNyOpenWindow(Date.UTC(2026, 6, 14, 12, 59))).toBe(false);
+    // Saturday: never.
+    expect(inNyOpenWindow(Date.UTC(2026, 10, 28, 14, 30))).toBe(false);
+  });
+
+  it("adds the caution line to an alert fired in the window, and only then", async () => {
+    // Shift the synthetic series (5m-aligned) so bar 2 closes at 14:00 UTC on a Tuesday: the alert fires at 09:00:04 ET.
+    const base = Date.UTC(2026, 10, 24, 14, 0) - 3 * BAR;
+    const shift = (cs: Candle[]) => cs.map((c) => ({ ...c, openTime: c.openTime + base, closeTime: c.closeTime + base }));
+    const series = { COREUSDT: shift(candles([100, 100, 98])), BTCUSDT: shift(candles([100, 100, 99.5])) };
+    const on = watcher(series, { nyOpenCaution: true });
+    await on.w.tick(base + 3 * BAR + 4000);
+    expect(on.sent[0]!.reason).toContain("⚠️ NY open (09:00–10:30 ET)");
+    const off = watcher(series, { nyOpenCaution: false });
+    await off.w.tick(base + 3 * BAR + 4000);
+    expect(off.sent[0]!.reason).not.toContain("NY open");
+    // Outside the window: no caution even when enabled.
+    const quiet = watcher({ COREUSDT: candles([100, 100, 98]), BTCUSDT: candles([100, 100, 99.5]) }, { nyOpenCaution: true });
+    await quiet.w.tick(3 * BAR + 4000); // 1970-01-01 00:15 UTC, a Thursday evening in New York
+    expect(quiet.sent[0]!.reason).not.toContain("NY open");
   });
 });

@@ -37,7 +37,7 @@ import {
 } from "./analysis/entryAutopsy.js";
 import { analyzeLeadLag, formatLeadLag, wilsonLower, DEFAULT_LEADLAG_PARAMS, type LeadLagParams } from "./analysis/leadLag.js";
 import { analyzeFade, formatFade, DEFAULT_FADE_PARAMS, type FadeParams, type FadeSide } from "./analysis/fade.js";
-import { FadeWatcher, FadeJournal, confirmJoined, fadeWatchConfigFromEnv, scoreFadeCalls } from "./watch/fadeWatch.js";
+import { FadeWatcher, FadeJournal, confirmJoined, fadeWatchConfigFromEnv, inNyOpenWindow, scoreFadeCalls } from "./watch/fadeWatch.js";
 import { AaveHealthMonitor, aaveConfigFrom } from "./watch/aaveHealthRun.js";
 import { FadeOutcomeLog, TelegramInbox, callKey, formatRecord, latestOutcomes, withAutoMissed, yourRecord } from "./watch/fadeReplies.js";
 import { ImbalanceWatcher, imbalanceConfigFromEnv } from "./watch/imbalanceWatch.js";
@@ -826,6 +826,15 @@ async function cmdFadeWatch(flags: Map<string, string>): Promise<void> {
       const late = calls.reduce((a, c) => a + c.lateSec, 0) / calls.length;
       console.log(`average alert delay ${late.toFixed(0)}s after the 5m close`);
       if (score.settled < 50) console.log(`Fewer than 50 settled calls: too few to compare with the backtest yet.`);
+      // The NY open caution: is the window still the weak spot live?
+      const nyGroup = (inWin: boolean) => {
+        const g = calls.filter((c) => score.byCall[callKey(c)] !== undefined && inNyOpenWindow(c.ts) === inWin);
+        return { n: g.length, w: g.filter((c) => score.byCall[callKey(c)]).length };
+      };
+      const nyIn = nyGroup(true), nyOut = nyGroup(false);
+      console.log(
+        `NY open 09:00–10:30 ET: ${nyIn.n > 0 ? `${p(nyIn.w / nyIn.n)} (n=${nyIn.n})` : "no calls yet"} vs other times ${nyOut.n > 0 ? `${p(nyOut.w / nyOut.n)} (n=${nyOut.n})` : "—"} · backtest 52.7% vs 57.1%`
+      );
     }
     // What you reported back by replying to the alerts in Telegram.
     const answers = latestOutcomes(new FadeOutcomeLog(watchCfg.outcomesPath ?? "./data/fade-outcomes.jsonl").readAll());

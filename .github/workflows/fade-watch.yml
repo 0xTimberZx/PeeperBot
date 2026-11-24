@@ -23,6 +23,10 @@ name: Fade watch
 # journaled to data/fade-shadow.jsonl, scored by --report, never alerted.
 # Set the FADE_SHADOW variable to "off" to stop them.
 #
+# NY open caution: alerts (and sandwiches) fired 09:00–10:30 New York time on
+# weekdays carry a warning — the rule has been only breakeven there (52.7% vs
+# 57% elsewhere). FADE_NY_CAUTION=off removes it.
+#
 # Peeper 1.02: every alert also records MSTR's move over the same 30m window
 # (OKX's MSTR perpetual). --report splits the live record by whether MSTR
 # joined the dump. Recorded only — alerts are unchanged. FADE_CONFIRM=off
@@ -139,6 +143,7 @@ jobs:
           FADE_CONFIRM: ${{ vars.FADE_CONFIRM }}
           FADE_CONFIRM_SYMBOL: ${{ vars.FADE_CONFIRM_SYMBOL }}
           FADE_CONFIRM_PCT: ${{ vars.FADE_CONFIRM_PCT }}
+          FADE_NY_CAUTION: ${{ vars.FADE_NY_CAUTION }}
         run: |
           if [ "${{ github.event.inputs.test }}" = "true" ]; then
             npm run fadewatch --workspace=apps/prdt-bot -- --test
