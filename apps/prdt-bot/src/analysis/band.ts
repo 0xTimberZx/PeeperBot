@@ -140,6 +140,7 @@ export interface FadeBandSplit {
   /** Fade calls by where the close sat in the band, bottom to top fifth. */
   byFifth: Bucket[];
   thirdsRetestedLow: { from: number; bucket: Bucket }[];
+  thirdsNearLowNoRetest: { from: number; bucket: Bucket }[];
 }
 
 export interface BandReport {
@@ -170,6 +171,7 @@ export function analyzeBand(
   const withBand = tagged.filter((t) => t.state !== null) as { trade: Trade; state: BandState }[];
   const sel = (f: (s: BandState) => boolean): Trade[] => withBand.filter((t) => f(t.state)).map((t) => t.trade);
   const isRetLow = (s: BandState): boolean => s.nearLow && s.lowRetested;
+  const isNearLowNoRet = (s: BandState): boolean => s.nearLow && !s.lowRetested;
   const isRetHigh = (s: BandState): boolean => s.nearHigh && s.highRetested && !isRetLow(s);
   const firstTime = target[0]?.closeTime ?? 0;
   const lastTime = target[target.length - 1]?.closeTime ?? 0;
@@ -189,11 +191,12 @@ export function analyzeBand(
     fade: {
       all: bucket(withBand.map((t) => t.trade)),
       retestedLow: bucket(sel(isRetLow)),
-      nearLowNoRetest: bucket(sel((s) => s.nearLow && !s.lowRetested)),
+      nearLowNoRetest: bucket(sel(isNearLowNoRet)),
       retestedHigh: bucket(sel(isRetHigh)),
       elsewhere: bucket(sel((s) => !s.nearLow && !isRetHigh(s))),
       byFifth: [0, 1, 2, 3, 4].map((k) => bucket(sel((s) => Math.min(4, Math.floor(s.pos * 5)) === k))),
       thirdsRetestedLow: thirds(sel(isRetLow), firstTime, lastTime),
+      thirdsNearLowNoRetest: thirds(sel(isNearLowNoRet), firstTime, lastTime),
     },
     standalone: {
       all: bucket(solo),
@@ -235,6 +238,8 @@ export function formatBand(r: BandReport, opts: { lead: string; target: string; 
     ...r.fade.byFifth.map((b, k) => R(`    ${k * 20}–${k * 20 + 20}% of the band`, b)),
     "  the idea, in each third of the period:",
     ...r.fade.thirdsRetestedLow.map((t, k) => R(`    ${["oldest", "middle", "newest"][k]} third (from ${day(t.from)})`, t.bucket)),
+    "  near the 24h low, not retested, in each third of the period:",
+    ...r.fade.thirdsNearLowNoRetest.map((t, k) => R(`    ${["oldest", "middle", "newest"][k]} third (from ${day(t.from)})`, t.bucket)),
     "",
     `B. The band rule on its own (every 5m close, hold ${p.holdBars * 5}m, one at a time)`,
     R("all band trades", r.standalone.all),
