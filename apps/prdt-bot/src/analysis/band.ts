@@ -147,6 +147,8 @@ export interface BandReport {
   bars: number;
   firstTime: number;
   lastTime: number;
+  /** Bars each fade call in section A is held for (from the fade params). */
+  fadeHoldBars: number;
   fade: FadeBandSplit;
   standalone: { all: Bucket; up: Bucket; down: Bucket; thirds: { from: number; bucket: Bucket }[] };
   /** Control: how often the close is up over any hold window. */
@@ -183,6 +185,7 @@ export function analyzeBand(
     bars: target.length,
     firstTime,
     lastTime,
+    fadeHoldBars: fadeParams.holdBars,
     fade: {
       all: bucket(withBand.map((t) => t.trade)),
       retestedLow: bucket(sel(isRetLow)),
@@ -222,7 +225,7 @@ export function formatBand(r: BandReport, opts: { lead: string; target: string; 
       `"retested" = a bar ≥${p.minGapBars * 5}m after the edge came within ${(p.tol * 100).toFixed(2)}% of it`,
     `period ${day(r.firstTime)} → ${day(r.lastTime)} · ${r.bars} 5m bars · breakeven ${pct(be)}`,
     "",
-    `A. Fade calls (${opts.lead} + ${opts.target} joint dump → UP 30m), split by the band`,
+    `A. Fade calls (${opts.lead} + ${opts.target} joint dump → UP ${r.fadeHoldBars * 5}m), split by the band`,
     R("all fade calls", r.fade.all),
     R("near a RETESTED 24h low (the idea)", r.fade.retestedLow),
     R("near the 24h low, not retested", r.fade.nearLowNoRetest),

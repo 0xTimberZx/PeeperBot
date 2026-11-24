@@ -55,5 +55,19 @@ describe("24h band", () => {
     expect(r.fade.retestedLow).toMatchObject({ n: 1, wins: 1 });
     const text = formatBand(r, { lead: "COREUSDT", target: "BTCUSDT", breakeven: 0.526 });
     expect(text).toContain("near a RETESTED 24h low (the idea)");
+    expect(r.fadeHoldBars).toBe(1);
+    expect(text).toContain("joint dump → UP 5m)");
+  });
+
+  it("scores section A with the fade hold it is given, not a fixed 30m", () => {
+    // Lead + target dump at bar 28; the target is up 1 bar later but back down 2 bars later.
+    const n = 30;
+    const target = bars([...flat(5), [95, 99, 98], ...flat(n - 9), [96, 100, 99], [95.1, 99, 95.6], [95.6, 98, 97.5], [94, 96, 95]] as [number, number, number][]);
+    const leadCloses = target.map((_, i) => (i === n - 2 ? 0.97 : 1));
+    const lead = target.map((c, i) => ({ ...c, open: leadCloses[i]!, high: leadCloses[i]!, low: leadCloses[i]!, close: leadCloses[i]! }));
+    const fp = { windowBars: 1, holdBars: 1, leadMovePct: 0.015, ownMovePct: 0.0015, side: "dump" as const };
+    const p = { ...P, lookbackBars: 26 };
+    expect(analyzeBand(lead, target, p, fp).fade.all).toMatchObject({ n: 1, wins: 1 });
+    expect(analyzeBand(lead, target, p, { ...fp, holdBars: 2 }).fade.all).toMatchObject({ n: 1, wins: 0 });
   });
 });

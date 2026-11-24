@@ -1170,6 +1170,8 @@ async function cmdBand(flags: Map<string, string>): Promise<void> {
     minGapBars: Math.max(1, Math.round(Number(flags.get("gap") ?? 30) / 5)),
     holdBars: Math.max(1, Math.round(Number(flags.get("hold") ?? 30) / 5)),
   };
+  // Section A scores fade calls with the fade params' own hold — give it the same --hold as section B.
+  const fadeParams: FadeParams = { ...DEFAULT_FADE_PARAMS, holdBars: params.holdBars };
   const end = Date.now() - Number(flags.get("skip-days") ?? 0) * 86_400_000;
   console.error(`[band] fetching ${count} × 5m bars each for ${[lead, ...targets].join(", ")}…`);
   const series: Candle[][] = [];
@@ -1180,7 +1182,7 @@ async function cmdBand(flags: Map<string, string>): Promise<void> {
   const cell = (b: { n: number; winRate: number; wilsonLow: number }): string =>
     b.n === 0 ? "—".padStart(26) : `${(b.winRate * 100).toFixed(1)}% (n=${b.n}, ${(b.wilsonLow * 100).toFixed(1)}%)`.padStart(26);
   const out = targets.map((target, k) => {
-    const report = analyzeBand(leadCandles!, targetCandles[k]!, params);
+    const report = analyzeBand(leadCandles!, targetCandles[k]!, params, fadeParams);
     console.log("\n" + formatBand(report, { lead, target, breakeven }));
     // Sensitivity: a result that only shows at one hand-picked setting is a fitted number.
     const sweep: { prox: number; tolPct: number; fade: unknown; solo: unknown }[] = [];
@@ -1188,7 +1190,7 @@ async function cmdBand(flags: Map<string, string>): Promise<void> {
     console.log(`  ${"near / tol".padEnd(14)}${"A: fade at retested low".padStart(26)}${"B: band rule alone".padStart(26)}`);
     for (const prox of proxes) {
       for (const tolPct of tols) {
-        const r = analyzeBand(leadCandles!, targetCandles[k]!, { ...params, prox, tol: tolPct / 100 });
+        const r = analyzeBand(leadCandles!, targetCandles[k]!, { ...params, prox, tol: tolPct / 100 }, fadeParams);
         sweep.push({ prox, tolPct, fade: r.fade.retestedLow, solo: r.standalone.all });
         console.log(`  ${`${prox * 100}% / ${tolPct}%`.padEnd(14)}${cell(r.fade.retestedLow)}${cell(r.standalone.all)}`);
       }
