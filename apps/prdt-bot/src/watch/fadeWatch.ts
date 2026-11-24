@@ -136,7 +136,7 @@ export function inNyOpenWindow(ts: number): boolean {
 }
 
 export const NY_OPEN_CAUTION =
-  "⚠️ NY open (09:00–10:30 ET): only breakeven at this hour in testing (53% vs 57% other times) — moves here tend to keep going. Skip or bet smaller.";
+  "⚠️ NY open (09:00–10:30 ET): no real edge at this hour in testing (53% won vs 57% other times) — moves here tend to keep going. Skip or bet smaller.";
 
 /** Did the confirm symbol join the move (same direction as the target, by at least `joinPct`)? */
 export function confirmJoined(call: Pick<FadeCall, "bet" | "confirm">, joinPct: number): boolean | null {

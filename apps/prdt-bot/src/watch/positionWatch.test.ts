@@ -107,6 +107,8 @@ describe("profit give-back guard", () => {
     const r = evaluateProfitGuard(candles, be, "short", prev, 1, guardParams);
     expect(r.fired).toBe(true);
     expect(r.body).toContain("profit slipping");
+    expect(r.body).toContain("from your avg entry");
+    expect(r.body).not.toContain("reakeven");
   });
 
   it("does NOT fire while the winner is still running (favorable momentum)", () => {

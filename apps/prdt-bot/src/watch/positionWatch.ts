@@ -235,7 +235,7 @@ function buildGuardBody(
   const sym = symbol.replace(/USDT$/, "");
   return [
     `⏳ ${sym ? `${sym} ${side}` : side === "short" ? "Short" : "Long"}: profit slipping`,
-    `Now +${pct(Math.max(0, favPct))} (price ${fmt(price)}), down from +${pct(peakPct)}. Breakeven ${fmt(breakeven)}.`,
+    `Now +${pct(Math.max(0, favPct))} from your avg entry ${fmt(breakeven)} (price ${fmt(price)}), down from +${pct(peakPct)}.`,
     `Price is turning ${turn}${mom.decelerating ? "" : " fast"}. Take some profit or move your stop closer before it becomes a loss.`,
   ].join("\n");
 }

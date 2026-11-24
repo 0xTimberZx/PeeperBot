@@ -419,7 +419,7 @@ describe("NY open caution", () => {
     const series = { COREUSDT: shift(candles([100, 100, 98])), BTCUSDT: shift(candles([100, 100, 99.5])) };
     const on = watcher(series, { nyOpenCaution: true });
     await on.w.tick(base + 3 * BAR + 4000);
-    expect(on.sent[0]!.reason).toContain("⚠️ NY open (09:00–10:30 ET): only breakeven");
+    expect(on.sent[0]!.reason).toContain("⚠️ NY open (09:00–10:30 ET): no real edge");
     const off = watcher(series, { nyOpenCaution: false });
     await off.w.tick(base + 3 * BAR + 4000);
     expect(off.sent[0]!.reason).not.toContain("NY open");
