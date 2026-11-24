@@ -1,0 +1,103 @@
+
+> peeperbot@0.0.0 bot:band
+> npm run band --workspace=apps/prdt-bot -- --days 540 --json
+
+
+> @peeperbot/prdt-bot@0.0.0 band
+> tsx src/cli.ts band --days 540 --json
+
+[band] fetching 155520 × 5m bars each for COREUSDT, BTCUSDT, ETHUSDT…
+
+═══════ 24h band · BTCUSDT ═══════
+band = lowest low → highest high of the last 24h · "near" = close in the outer 20% · "retested" = a bar ≥30m after the edge came within 0.20% of it
+period 2025-06-02 → 2026-11-24 · 155520 5m bars · breakeven 52.6%
+
+A. Fade calls (COREUSDT + BTCUSDT joint dump → UP 30m), split by the band
+  all fade calls                           n= 1139  win  56.5%  (95% floor  53.6%)  EDGE
+  near a RETESTED 24h low (the idea)       n=  118  win  51.7%  (95% floor  42.8%)  no edge
+  near the 24h low, not retested           n=  432  win  57.2%  (95% floor  52.5%)  unproven
+  near a retested 24h HIGH (band says DOWN) n=   18  win  50.0%  (95% floor  29.0%)  no edge
+  everywhere else                          n=  571  win  57.1%  (95% floor  53.0%)  EDGE
+  by where the close sat in the band:
+      0–20% of the band                    n=  550  win  56.0%  (95% floor  51.8%)  unproven
+      20–40% of the band                   n=  211  win  58.3%  (95% floor  51.6%)  unproven
+      40–60% of the band                   n=  179  win  53.1%  (95% floor  45.8%)  unproven
+      60–80% of the band                   n=  146  win  62.3%  (95% floor  54.2%)  EDGE
+      80–100% of the band                  n=   53  win  49.1%  (95% floor  36.1%)  no edge
+  the idea, in each third of the period:
+      oldest third (from 2025-06-02)       n=   42  win  59.5%  (95% floor  44.5%)  unproven
+      middle third (from 2025-11-29)       n=   33  win  42.4%  (95% floor  27.2%)  no edge
+      newest third (from 2026-05-28)       n=   43  win  51.2%  (95% floor  36.8%)  no edge
+
+B. The band rule on its own (every 5m close, hold 30m, one at a time)
+  all band trades                          n= 6285  win  52.9%  (95% floor  51.6%)  unproven
+  UP at a retested 24h low                 n= 2884  win  53.5%  (95% floor  51.7%)  unproven
+  DOWN at a retested 24h high              n= 3401  win  52.3%  (95% floor  50.6%)  no edge
+    oldest third (from 2025-06-02)         n= 2232  win  53.6%  (95% floor  51.5%)  unproven
+    middle third (from 2025-11-29)         n= 1844  win  54.1%  (95% floor  51.8%)  unproven
+    newest third (from 2026-05-28)         n= 2209  win  51.2%  (95% floor  49.1%)  no edge
+
+Control: BTCUSDT closes up over any 30m: 50.0%
+EDGE = even the 95% floor beats breakeven. Trust a slice only at n ≥ 50 and only if it holds in every third.
+═══════════════════════════════════
+
+BTCUSDT sensitivity (win rate, n, 95% floor) — breakeven 52.6%
+  near / tol       A: fade at retested low        B: band rule alone
+  10% / 0.1%           52.6% (n=38, 37.3%)     55.3% (n=2275, 53.2%)
+  10% / 0.2%           54.4% (n=68, 42.7%)     55.4% (n=3158, 53.7%)
+  10% / 0.4%           55.1% (n=89, 44.7%)     55.3% (n=3695, 53.7%)
+  20% / 0.1%           46.9% (n=64, 35.2%)     53.5% (n=3926, 52.0%)
+  20% / 0.2%          51.7% (n=118, 42.8%)     52.9% (n=6285, 51.6%)
+  20% / 0.4%          52.8% (n=178, 45.5%)     53.2% (n=8454, 52.1%)
+  30% / 0.1%           47.1% (n=87, 37.0%)     52.7% (n=5370, 51.4%)
+  30% / 0.2%          54.0% (n=163, 46.3%)     52.2% (n=8993, 51.2%)
+  30% / 0.4%          54.6% (n=251, 48.4%)    52.2% (n=12808, 51.4%)
+
+═══════ 24h band · ETHUSDT ═══════
+band = lowest low → highest high of the last 24h · "near" = close in the outer 20% · "retested" = a bar ≥30m after the edge came within 0.20% of it
+period 2025-06-02 → 2026-11-24 · 155520 5m bars · breakeven 52.6%
+
+A. Fade calls (COREUSDT + ETHUSDT joint dump → UP 30m), split by the band
+  all fade calls                           n= 1218  win  57.5%  (95% floor  54.7%)  EDGE
+  near a RETESTED 24h low (the idea)       n=   86  win  62.8%  (95% floor  52.2%)  unproven
+  near the 24h low, not retested           n=  476  win  58.4%  (95% floor  53.9%)  EDGE
+  near a retested 24h HIGH (band says DOWN) n=   19  win  68.4%  (95% floor  46.0%)  unproven
+  everywhere else                          n=  637  win  55.7%  (95% floor  51.8%)  unproven
+  by where the close sat in the band:
+      0–20% of the band                    n=  562  win  59.1%  (95% floor  55.0%)  EDGE
+      20–40% of the band                   n=  238  win  56.7%  (95% floor  50.4%)  unproven
+      40–60% of the band                   n=  188  win  54.3%  (95% floor  47.1%)  unproven
+      60–80% of the band                   n=  163  win  58.3%  (95% floor  50.6%)  unproven
+      80–100% of the band                  n=   67  win  53.7%  (95% floor  41.9%)  unproven
+  the idea, in each third of the period:
+      oldest third (from 2025-06-02)       n=   17  win  76.5%  (95% floor  52.7%)  EDGE
+      middle third (from 2025-11-29)       n=   38  win  57.9%  (95% floor  42.2%)  unproven
+      newest third (from 2026-05-28)       n=   31  win  61.3%  (95% floor  43.8%)  unproven
+
+B. The band rule on its own (every 5m close, hold 30m, one at a time)
+  all band trades                          n= 3926  win  54.1%  (95% floor  52.6%)  unproven
+  UP at a retested 24h low                 n= 1623  win  54.1%  (95% floor  51.7%)  unproven
+  DOWN at a retested 24h high              n= 2303  win  54.1%  (95% floor  52.1%)  unproven
+    oldest third (from 2025-06-02)         n= 1260  win  52.3%  (95% floor  49.5%)  no edge
+    middle third (from 2025-11-29)         n= 1210  win  53.7%  (95% floor  50.9%)  unproven
+    newest third (from 2026-05-28)         n= 1456  win  56.0%  (95% floor  53.5%)  EDGE
+
+Control: ETHUSDT closes up over any 30m: 50.2%
+EDGE = even the 95% floor beats breakeven. Trust a slice only at n ≥ 50 and only if it holds in every third.
+═══════════════════════════════════
+
+ETHUSDT sensitivity (win rate, n, 95% floor) — breakeven 52.6%
+  near / tol       A: fade at retested low        B: band rule alone
+  10% / 0.1%           72.4% (n=29, 54.3%)     53.6% (n=1215, 50.8%)
+  10% / 0.2%           66.7% (n=51, 53.0%)     54.2% (n=2007, 52.0%)
+  10% / 0.4%           60.2% (n=83, 49.5%)     55.5% (n=2836, 53.7%)
+  20% / 0.1%           65.1% (n=43, 50.2%)     54.1% (n=2128, 52.0%)
+  20% / 0.2%           62.8% (n=86, 52.2%)     54.1% (n=3926, 52.6%)
+  20% / 0.4%          59.9% (n=157, 52.1%)     55.1% (n=6492, 53.9%)
+  30% / 0.1%           62.7% (n=59, 50.0%)     53.1% (n=3093, 51.4%)
+  30% / 0.2%          57.0% (n=128, 48.4%)     52.8% (n=5835, 51.5%)
+  30% / 0.4%          56.8% (n=220, 50.2%)    53.4% (n=10036, 52.4%)
+----- COPY BELOW (JSON) -----
+{"lead":"COREUSDT","days":540,"breakeven":0.5263157894736842,"generated":"2026-11-24T19:58:21.486Z","results":[{"target":"BTCUSDT","report":{"params":{"lookbackBars":288,"prox":0.2,"tol":0.002,"minGapBars":6,"holdBars":6},"bars":155520,"firstTime":1748894699999,"lastTime":1795550399999,"fade":{"all":{"n":1139,"wins":643,"winRate":0.5645302897278315,"wilsonLow":0.5355660114956834,"avgFollowPct":0},"retestedLow":{"n":118,"wins":61,"winRate":0.5169491525423728,"wilsonLow":0.4276814843920897,"avgFollowPct":0},"nearLowNoRetest":{"n":432,"wins":247,"winRate":0.5717592592592593,"wilsonLow":0.5246663976173918,"avgFollowPct":0},"retestedHigh":{"n":18,"wins":9,"winRate":0.5,"wilsonLow":0.2903070395897999,"avgFollowPct":0},"elsewhere":{"n":571,"wins":326,"winRate":0.5709281961471103,"wilsonLow":0.5299903124726036,"avgFollowPct":0},"byFifth":[{"n":550,"wins":308,"winRate":0.56,"wilsonLow":0.5182404753972537,"avgFollowPct":0},{"n":211,"wins":123,"winRate":0.5829383886255924,"wilsonLow":0.5155048518292172,"avgFollowPct":0},{"n":179,"wins":95,"winRate":0.5307262569832403,"wilsonLow":0.45773972088888626,"avgFollowPct":0},{"n":146,"wins":91,"winRate":0.6232876712328768,"wilsonLow":0.5424754792444779,"avgFollowPct":0},{"n":53,"wins":26,"winRate":0.49056603773584906,"wilsonLow":0.36124029356039444,"avgFollowPct":0}],"thirdsRetestedLow":[{"from":1748894699999,"bucket":{"n":42,"wins":25,"winRate":0.5952380952380952,"wilsonLow":0.4449404552817742,"avgFollowPct":0}},{"from":1764446599999,"bucket":{"n":33,"wins":14,"winRate":0.42424242424242425,"wilsonLow":0.272353589950299,"avgFollowPct":0}},{"from":1779998499999,"bucket":{"n":43,"wins":22,"winRate":0.5116279069767442,"wilsonLow":0.36752063766074083,"avgFollowPct":0}}]},"standalone":{"all":{"n":6285,"wins":3323,"winRate":0.5287191726332537,"wilsonLow":0.5163642305956224,"avgFollowPct":0},"up":{"n":2884,"wins":1544,"winRate":0.5353675450762829,"wilsonLow":0.5171297038414567,"avgFollowPct":0},"down":{"n":3401,"wins":1779,"winRate":0.5230814466333431,"wilsonLow":0.5062783811870637,"avgFollowPct":0},"thirds":[{"from":1748894699999,"bucket":{"n":2232,"wins":1196,"winRate":0.53584229390681,"wilsonLow":0.5151084119192875,"avgFollowPct":0}},{"from":1764446599999,"bucket":{"n":1844,"wins":997,"winRate":0.5406724511930586,"wilsonLow":0.5178654487557233,"avgFollowPct":0}},{"from":1779998499999,"bucket":{"n":2209,"wins":1130,"winRate":0.5115436849253056,"wilsonLow":0.490696231148991,"avgFollowPct":0}}]},"baseUpRate":0.4998199519014365},"sweep":[{"prox":0.1,"tolPct":0.1,"fade":{"n":38,"wins":20,"winRate":0.5263157894736842,"wilsonLow":0.37258710742710854,"avgFollowPct":0},"solo":{"n":2275,"wins":1257,"winRate":0.5525274725274725,"wilsonLow":0.5320232732523785,"avgFollowPct":0}},{"prox":0.1,"tolPct":0.2,"fade":{"n":68,"wins":37,"winRate":0.5441176470588235,"wilsonLow":0.4265639778429345,"avgFollowPct":0},"solo":{"n":3158,"wins":1750,"winRate":0.5541481950601647,"wilsonLow":0.536756442997557,"avgFollowPct":0}},{"prox":0.1,"tolPct":0.4,"fade":{"n":89,"wins":49,"winRate":0.550561797752809,"wilsonLow":0.4472614742822269,"avgFollowPct":0},"solo":{"n":3695,"wins":2045,"winRate":0.5534506089309879,"wilsonLow":0.5373737125681242,"avgFollowPct":0}},{"prox":0.2,"tolPct":0.1,"fade":{"n":64,"wins":30,"winRate":0.46875,"wilsonLow":0.3517578764404486,"avgFollowPct":0},"solo":{"n":3926,"wins":2101,"winRate":0.5351502801833927,"wilsonLow":0.5195216951795413,"avgFollowPct":0}},{"prox":0.2,"tolPct":0.2,"fade":{"n":118,"wins":61,"winRate":0.5169491525423728,"wilsonLow":0.4276814843920897,"avgFollowPct":0},"solo":{"n":6285,"wins":3323,"winRate":0.5287191726332537,"wilsonLow":0.5163642305956224,"avgFollowPct":0}},{"prox":0.2,"tolPct":0.4,"fade":{"n":178,"wins":94,"winRate":0.5280898876404494,"wilsonLow":0.4549347430730046,"avgFollowPct":0},"solo":{"n":8454,"wins":4494,"winRate":0.531582682753726,"wilsonLow":0.5209335560990692,"avgFollowPct":0}},{"prox":0.3,"tolPct":0.1,"fade":{"n":87,"wins":41,"winRate":0.47126436781609193,"wilsonLow":0.3698208820020664,"avgFollowPct":0},"solo":{"n":5370,"wins":2832,"winRate":0.5273743016759777,"wilsonLow":0.5140062390716753,"avgFollowPct":0}},{"prox":0.3,"tolPct":0.2,"fade":{"n":163,"wins":88,"winRate":0.5398773006134969,"wilsonLow":0.46332455172793646,"avgFollowPct":0},"solo":{"n":8993,"wins":4693,"winRate":0.5218503280329145,"wilsonLow":0.5115189441542961,"avgFollowPct":0}},{"prox":0.3,"tolPct":0.4,"fade":{"n":251,"wins":137,"winRate":0.545816733067729,"wilsonLow":0.4839913945806027,"avgFollowPct":0},"solo":{"n":12808,"wins":6692,"winRate":0.5224859462835728,"wilsonLow":0.5138299069578612,"avgFollowPct":0}}]},{"target":"ETHUSDT","report":{"params":{"lookbackBars":288,"prox":0.2,"tol":0.002,"minGapBars":6,"holdBars":6},"bars":155520,"firstTime":1748894699999,"lastTime":1795550399999,"fade":{"all":{"n":1218,"wins":700,"winRate":0.5747126436781609,"wilsonLow":0.5467553394796152,"avgFollowPct":0},"retestedLow":{"n":86,"wins":54,"winRate":0.627906976744186,"wilsonLow":0.5223363580204515,"avgFollowPct":0},"nearLowNoRetest":{"n":476,"wins":278,"winRate":0.5840336134453782,"wilsonLow":0.5392540281288655,"avgFollowPct":0},"retestedHigh":{"n":19,"wins":13,"winRate":0.6842105263157895,"wilsonLow":0.4601001017506463,"avgFollowPct":0},"elsewhere":{"n":637,"wins":355,"winRate":0.5572998430141287,"wilsonLow":0.5184974093926826,"avgFollowPct":0},"byFifth":[{"n":562,"wins":332,"winRate":0.5907473309608541,"wilsonLow":0.5496125323122308,"avgFollowPct":0},{"n":238,"wins":135,"winRate":0.5672268907563025,"wilsonLow":0.5037046695511521,"avgFollowPct":0},{"n":188,"wins":102,"winRate":0.5425531914893617,"wilsonLow":0.471198026969167,"avgFollowPct":0},{"n":163,"wins":95,"winRate":0.5828220858895705,"wilsonLow":0.5060682150667803,"avgFollowPct":0},{"n":67,"wins":36,"winRate":0.5373134328358209,"wilsonLow":0.41916248694673824,"avgFollowPct":0}],"thirdsRetestedLow":[{"from":1748894699999,"bucket":{"n":17,"wins":13,"winRate":0.7647058823529411,"wilsonLow":0.5273775411082839,"avgFollowPct":0}},{"from":1764446599999,"bucket":{"n":38,"wins":22,"winRate":0.5789473684210527,"wilsonLow":0.4219207061312732,"avgFollowPct":0}},{"from":1779998499999,"bucket":{"n":31,"wins":19,"winRate":0.6129032258064516,"wilsonLow":0.43823801141131963,"avgFollowPct":0}}]},"standalone":{"all":{"n":3926,"wins":2125,"winRate":0.5412633723892002,"wilsonLow":0.5256434452634071,"avgFollowPct":0},"up":{"n":1623,"wins":878,"winRate":0.540973505853358,"wilsonLow":0.5166612328167147,"avgFollowPct":0},"down":{"n":2303,"wins":1247,"winRate":0.5414676508901433,"wilsonLow":0.5210646826638062,"avgFollowPct":0},"thirds":[{"from":1748894699999,"bucket":{"n":1260,"wins":659,"winRate":0.523015873015873,"wilsonLow":0.49540866470812184,"avgFollowPct":0}},{"from":1764446599999,"bucket":{"n":1210,"wins":650,"winRate":0.5371900826446281,"wilsonLow":0.5090216498771578,"avgFollowPct":0}},{"from":1779998499999,"bucket":{"n":1456,"wins":816,"winRate":0.5604395604395604,"wilsonLow":0.5348189315503908,"avgFollowPct":0}}]},"baseUpRate":0.5024563704875445},"sweep":[{"prox":0.1,"tolPct":0.1,"fade":{"n":29,"wins":21,"winRate":0.7241379310344828,"wilsonLow":0.5428252365556403,"avgFollowPct":0},"solo":{"n":1215,"wins":651,"winRate":0.5358024691358024,"wilsonLow":0.5076908050336248,"avgFollowPct":0}},{"prox":0.1,"tolPct":0.2,"fade":{"n":51,"wins":34,"winRate":0.6666666666666666,"wilsonLow":0.5296812196648056,"avgFollowPct":0},"solo":{"n":2007,"wins":1087,"winRate":0.541604384653712,"wilsonLow":0.5197462322182307,"avgFollowPct":0}},{"prox":0.1,"tolPct":0.4,"fade":{"n":83,"wins":50,"winRate":0.6024096385542169,"wilsonLow":0.4948463779413774,"avgFollowPct":0},"solo":{"n":2836,"wins":1574,"winRate":0.5550070521861777,"wilsonLow":0.5366542308077725,"avgFollowPct":0}},{"prox":0.2,"tolPct":0.1,"fade":{"n":43,"wins":28,"winRate":0.6511627906976745,"wilsonLow":0.501715070970981,"avgFollowPct":0},"solo":{"n":2128,"wins":1152,"winRate":0.5413533834586466,"wilsonLow":0.5201264070501925,"avgFollowPct":0}},{"prox":0.2,"tolPct":0.2,"fade":{"n":86,"wins":54,"winRate":0.627906976744186,"wilsonLow":0.5223363580204515,"avgFollowPct":0},"solo":{"n":3926,"wins":2125,"winRate":0.5412633723892002,"wilsonLow":0.5256434452634071,"avgFollowPct":0}},{"prox":0.2,"tolPct":0.4,"fade":{"n":157,"wins":94,"winRate":0.5987261146496815,"wilsonLow":0.520579878969548,"avgFollowPct":0},"solo":{"n":6492,"wins":3578,"winRate":0.5511398644485521,"wilsonLow":0.5390140560176491,"avgFollowPct":0}},{"prox":0.3,"tolPct":0.1,"fade":{"n":59,"wins":37,"winRate":0.6271186440677966,"wilsonLow":0.49953356682142125,"avgFollowPct":0},"solo":{"n":3093,"wins":1643,"winRate":0.5311994827028774,"wilsonLow":0.5135847619738501,"avgFollowPct":0}},{"prox":0.3,"tolPct":0.2,"fade":{"n":128,"wins":73,"winRate":0.5703125,"wilsonLow":0.4837377469365458,"avgFollowPct":0},"solo":{"n":5835,"wins":3079,"winRate":0.5276778063410454,"wilsonLow":0.5148540897331342,"avgFollowPct":0}},{"prox":0.3,"tolPct":0.4,"fade":{"n":220,"wins":125,"winRate":0.5681818181818182,"wilsonLow":0.5021108204352644,"avgFollowPct":0},"solo":{"n":10036,"wins":5356,"winRate":0.533678756476684,"wilsonLow":0.5239075380587686,"avgFollowPct":0}}]}]}
+----- COPY ABOVE -----
+

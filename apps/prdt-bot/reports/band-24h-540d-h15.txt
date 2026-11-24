@@ -1,0 +1,99 @@
+
+> peeperbot@0.0.0 bot:band
+> npm run band --workspace=apps/prdt-bot -- --days 540 --hold 15
+
+
+> @peeperbot/prdt-bot@0.0.0 band
+> tsx src/cli.ts band --days 540 --hold 15
+
+[band] fetching 155520 × 5m bars each for COREUSDT, BTCUSDT, ETHUSDT…
+
+═══════ 24h band · BTCUSDT ═══════
+band = lowest low → highest high of the last 24h · "near" = close in the outer 20% · "retested" = a bar ≥30m after the edge came within 0.20% of it
+period 2025-06-02 → 2026-11-24 · 155520 5m bars · breakeven 52.6%
+
+A. Fade calls (COREUSDT + BTCUSDT joint dump → UP 30m), split by the band
+  all fade calls                           n= 1139  win  56.5%  (95% floor  53.6%)  EDGE
+  near a RETESTED 24h low (the idea)       n=  118  win  51.7%  (95% floor  42.8%)  no edge
+  near the 24h low, not retested           n=  432  win  57.2%  (95% floor  52.5%)  unproven
+  near a retested 24h HIGH (band says DOWN) n=   18  win  50.0%  (95% floor  29.0%)  no edge
+  everywhere else                          n=  571  win  57.1%  (95% floor  53.0%)  EDGE
+  by where the close sat in the band:
+      0–20% of the band                    n=  550  win  56.0%  (95% floor  51.8%)  unproven
+      20–40% of the band                   n=  211  win  58.3%  (95% floor  51.6%)  unproven
+      40–60% of the band                   n=  179  win  53.1%  (95% floor  45.8%)  unproven
+      60–80% of the band                   n=  146  win  62.3%  (95% floor  54.2%)  EDGE
+      80–100% of the band                  n=   53  win  49.1%  (95% floor  36.1%)  no edge
+  the idea, in each third of the period:
+      oldest third (from 2025-06-02)       n=   42  win  59.5%  (95% floor  44.5%)  unproven
+      middle third (from 2025-11-29)       n=   33  win  42.4%  (95% floor  27.2%)  no edge
+      newest third (from 2026-05-28)       n=   43  win  51.2%  (95% floor  36.8%)  no edge
+
+B. The band rule on its own (every 5m close, hold 15m, one at a time)
+  all band trades                          n=10654  win  52.5%  (95% floor  51.6%)  no edge
+  UP at a retested 24h low                 n= 4854  win  52.4%  (95% floor  51.0%)  no edge
+  DOWN at a retested 24h high              n= 5800  win  52.6%  (95% floor  51.3%)  no edge
+    oldest third (from 2025-06-02)         n= 3786  win  52.6%  (95% floor  51.0%)  no edge
+    middle third (from 2025-11-29)         n= 3130  win  53.6%  (95% floor  51.9%)  unproven
+    newest third (from 2026-05-28)         n= 3738  win  51.5%  (95% floor  49.9%)  no edge
+
+Control: BTCUSDT closes up over any 15m: 49.5%
+EDGE = even the 95% floor beats breakeven. Trust a slice only at n ≥ 50 and only if it holds in every third.
+═══════════════════════════════════
+
+BTCUSDT sensitivity (win rate, n, 95% floor) — breakeven 52.6%
+  near / tol       A: fade at retested low        B: band rule alone
+  10% / 0.1%           52.6% (n=38, 37.3%)     54.4% (n=3191, 52.6%)
+  10% / 0.2%           54.4% (n=68, 42.7%)     54.0% (n=4530, 52.5%)
+  10% / 0.4%           55.1% (n=89, 44.7%)     53.9% (n=5362, 52.6%)
+  20% / 0.1%           46.9% (n=64, 35.2%)     52.5% (n=6478, 51.3%)
+  20% / 0.2%          51.7% (n=118, 42.8%)    52.5% (n=10654, 51.6%)
+  20% / 0.4%          52.8% (n=178, 45.5%)    52.4% (n=14565, 51.6%)
+  30% / 0.1%           47.1% (n=87, 37.0%)     51.6% (n=9359, 50.6%)
+  30% / 0.2%          54.0% (n=163, 46.3%)    51.8% (n=16101, 51.0%)
+  30% / 0.4%          54.6% (n=251, 48.4%)    51.7% (n=23332, 51.1%)
+
+═══════ 24h band · ETHUSDT ═══════
+band = lowest low → highest high of the last 24h · "near" = close in the outer 20% · "retested" = a bar ≥30m after the edge came within 0.20% of it
+period 2025-06-02 → 2026-11-24 · 155520 5m bars · breakeven 52.6%
+
+A. Fade calls (COREUSDT + ETHUSDT joint dump → UP 30m), split by the band
+  all fade calls                           n= 1218  win  57.5%  (95% floor  54.7%)  EDGE
+  near a RETESTED 24h low (the idea)       n=   86  win  62.8%  (95% floor  52.2%)  unproven
+  near the 24h low, not retested           n=  476  win  58.4%  (95% floor  53.9%)  EDGE
+  near a retested 24h HIGH (band says DOWN) n=   19  win  68.4%  (95% floor  46.0%)  unproven
+  everywhere else                          n=  637  win  55.7%  (95% floor  51.8%)  unproven
+  by where the close sat in the band:
+      0–20% of the band                    n=  562  win  59.1%  (95% floor  55.0%)  EDGE
+      20–40% of the band                   n=  238  win  56.7%  (95% floor  50.4%)  unproven
+      40–60% of the band                   n=  188  win  54.3%  (95% floor  47.1%)  unproven
+      60–80% of the band                   n=  163  win  58.3%  (95% floor  50.6%)  unproven
+      80–100% of the band                  n=   67  win  53.7%  (95% floor  41.9%)  unproven
+  the idea, in each third of the period:
+      oldest third (from 2025-06-02)       n=   17  win  76.5%  (95% floor  52.7%)  EDGE
+      middle third (from 2025-11-29)       n=   38  win  57.9%  (95% floor  42.2%)  unproven
+      newest third (from 2026-05-28)       n=   31  win  61.3%  (95% floor  43.8%)  unproven
+
+B. The band rule on its own (every 5m close, hold 15m, one at a time)
+  all band trades                          n= 6493  win  53.5%  (95% floor  52.3%)  unproven
+  UP at a retested 24h low                 n= 2622  win  52.3%  (95% floor  50.3%)  no edge
+  DOWN at a retested 24h high              n= 3871  win  54.3%  (95% floor  52.8%)  EDGE
+    oldest third (from 2025-06-02)         n= 2063  win  52.6%  (95% floor  50.4%)  no edge
+    middle third (from 2025-11-29)         n= 2015  win  53.3%  (95% floor  51.2%)  unproven
+    newest third (from 2026-05-28)         n= 2415  win  54.4%  (95% floor  52.4%)  unproven
+
+Control: ETHUSDT closes up over any 15m: 49.9%
+EDGE = even the 95% floor beats breakeven. Trust a slice only at n ≥ 50 and only if it holds in every third.
+═══════════════════════════════════
+
+ETHUSDT sensitivity (win rate, n, 95% floor) — breakeven 52.6%
+  near / tol       A: fade at retested low        B: band rule alone
+  10% / 0.1%           72.4% (n=29, 54.3%)     53.8% (n=1616, 51.3%)
+  10% / 0.2%           66.7% (n=51, 53.0%)     53.7% (n=2762, 51.9%)
+  10% / 0.4%           60.2% (n=83, 49.5%)     55.0% (n=4030, 53.4%)
+  20% / 0.1%           65.1% (n=43, 50.2%)     53.1% (n=3386, 51.4%)
+  20% / 0.2%           62.8% (n=86, 52.2%)     53.5% (n=6493, 52.3%)
+  20% / 0.4%          59.9% (n=157, 52.1%)    53.8% (n=11066, 52.9%)
+  30% / 0.1%           62.7% (n=59, 50.0%)     52.5% (n=5207, 51.1%)
+  30% / 0.2%          57.0% (n=128, 48.4%)    52.5% (n=10201, 51.5%)
+  30% / 0.4%          56.8% (n=220, 50.2%)    52.7% (n=18101, 51.9%)
