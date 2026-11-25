@@ -152,3 +152,22 @@ describe("losing calls' settle line", () => {
     expect(lossSettleLine([c({ finalPct: 0.01 })], "BTCUSDT", from, 60_000)).toBeNull();
   });
 });
+
+describe("blank settings", () => {
+  it("treats blank, whitespace or missing as unset", async () => {
+    const { setting } = await import("./positionWatch.js");
+    expect(setting("")).toBeUndefined();
+    expect(setting("   ")).toBeUndefined();
+    expect(setting(undefined)).toBeUndefined();
+    expect(setting(" 64465 ")).toBe("64465");
+  });
+
+  it("falls back to the default for blank or non-numeric values instead of reading 0", async () => {
+    const { numSetting } = await import("./positionWatch.js");
+    expect(numSetting("", 0.25)).toBe(0.25); // GitHub passes a blank repo variable as ""
+    expect(numSetting("abc", 0.5)).toBe(0.5);
+    expect(numSetting(undefined, 64_000)).toBe(64_000);
+    expect(numSetting("0.4", 0.25)).toBe(0.4);
+    expect(numSetting("0", 0.25)).toBe(0); // a real 0 is kept; callers reject it where 0 is meaningless
+  });
+});

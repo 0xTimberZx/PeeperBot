@@ -71,6 +71,8 @@ import {
   evaluatePosition,
   evaluateProfitGuard,
   lossSettleLine,
+  numSetting,
+  setting,
   sampleBody,
   type PositionSpec,
   type ProfitGuardParams,
@@ -522,7 +524,8 @@ async function emitTrack(
 }
 
 function positionSpecFrom(flags: Map<string, string>): PositionSpec {
-  const envOr = (flag: string, env: string) => flags.get(flag) ?? process.env[env];
+  // Blank settings (a blank or deleted repo variable arrives as "") fall back to defaults.
+  const envOr = (flag: string, env: string) => setting(flags.get(flag) ?? process.env[env]);
   const symbol = (envOr("symbol", "POS_SYMBOL") ?? "BTCUSDT").toUpperCase();
   const sideRaw = (envOr("side", "POS_SIDE") ?? "short").toLowerCase();
   const side: PosSide = sideRaw === "long" || sideRaw === "buy" || sideRaw === "up" ? "long" : "short";
@@ -532,7 +535,8 @@ function positionSpecFrom(flags: Map<string, string>): PositionSpec {
     .split(",")
     .map((s) => Number(s.trim()))
     .filter((n) => Number.isFinite(n) && n > 0);
-  const proximityPct = Number(envOr("proximity", "POS_PROXIMITY") ?? 0.005);
+  const proximity = numSetting(envOr("proximity", "POS_PROXIMITY"), 0.005);
+  const proximityPct = proximity > 0 ? proximity : 0.005;
 
   if (!Number.isFinite(entry) || entry <= 0) throw new Error("poswatch: --entry <price> is required (a positive number)");
   if (!Number.isFinite(stop) || stop <= 0) throw new Error("poswatch: --stop <price> is required (a positive number)");
@@ -546,7 +550,7 @@ async function cmdPosWatch(flags: Map<string, string>): Promise<void> {
   // Scheduled cron with no position configured yet: no-op cleanly (exit 0) so an
   // unarmed watcher doesn't fail the job and email you. Manual runs still error.
   if (flags.get("once") === "true") {
-    const val = (flag: string, env: string) => Number(flags.get(flag) ?? process.env[env]);
+    const val = (flag: string, env: string) => numSetting(flags.get(flag) ?? process.env[env], NaN);
     const missing: string[] = [];
     if (!(val("entry", "POS_ENTRY") > 0)) missing.push("POS_ENTRY");
     if (!(val("stop", "POS_STOP") > 0)) missing.push("POS_STOP");
@@ -561,11 +565,15 @@ async function cmdPosWatch(flags: Map<string, string>): Promise<void> {
   // Profit give-back guard: keys off your BLENDED breakeven (defaults to entry).
   // --profit is a % favorable move that arms it (0.25 => a 0.25% move in your
   // favor); --giveback is the fraction of the peak surrendered that fires it.
-  const envOrP = (flag: string, env: string) => flags.get(flag) ?? process.env[env];
-  const breakeven = Number(envOrP("breakeven", "POS_BREAKEVEN") ?? spec.entry);
+  // Blank = unset: breakeven falls back to your entry, the guard to 0.25% / half the peak.
+  const envOrP = (flag: string, env: string) => setting(flags.get(flag) ?? process.env[env]);
+  const be = numSetting(envOrP("breakeven", "POS_BREAKEVEN"), spec.entry);
+  const breakeven = be > 0 ? be : spec.entry;
+  const arm = numSetting(envOrP("profit", "POS_PROFIT_TARGET"), 0.25);
+  const giveback = numSetting(envOrP("giveback", "POS_GIVEBACK"), 0.5);
   const guardParams: ProfitGuardParams = {
-    armPct: Number(envOrP("profit", "POS_PROFIT_TARGET") ?? 0.25) / 100,
-    givebackFrac: Number(envOrP("giveback", "POS_GIVEBACK") ?? 0.5),
+    armPct: (arm > 0 ? arm : 0.25) / 100,
+    givebackFrac: giveback > 0 && giveback <= 1 ? giveback : 0.5,
   };
 
   // Optional reference line: where the bot's losing calls on this coin settled

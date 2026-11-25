@@ -240,6 +240,23 @@ function buildGuardBody(
   ].join("\n");
 }
 
+/**
+ * A setting from a flag or env var, with blank treated as unset. GitHub passes
+ * a repo variable that is blank — or deleted — as an empty string, which must
+ * fall back to the default rather than read as 0.
+ */
+export function setting(raw: string | undefined): string | undefined {
+  const t = raw?.trim();
+  return t ? t : undefined;
+}
+
+/** A numeric setting: blank or not a number → `def`. */
+export function numSetting(raw: string | undefined, def: number): number {
+  const t = setting(raw);
+  const n = t === undefined ? NaN : Number(t);
+  return Number.isFinite(n) ? n : def;
+}
+
 /** What `lossSettleLine` needs from a post-settle review of one bot call. */
 export interface SettledCall {
   symbol: string;
