@@ -16,6 +16,7 @@ import { dirname } from "node:path";
 import { fetchKlines, intervalMs, type Candle, type Interval } from "../feed/binance.js";
 import { AlertDispatcher, type Alert } from "../alerts.js";
 import { DEFAULT_FADE_PARAMS, type FadeParams } from "../analysis/fade.js";
+import { bandAt, DEFAULT_BAND_PARAMS, type BandParams } from "../analysis/band.js";
 import { wilsonLower } from "../analysis/leadLag.js";
 import type { Dir } from "../analysis/prdtJournal.js";
 import { FadeOutcomeLog, callKey, handleReplies, latestOutcomes, TelegramError, type TelegramInbox } from "./fadeReplies.js";
@@ -83,6 +84,8 @@ export interface FadeCall {
   rule?: string;
   /** Peeper 1.02: the confirm symbol's move over the same window (null = no data). */
   confirm?: { symbol: string; pct: number | null };
+  /** The 24h band at the signal bar (null = not enough data; absent = filter off or older call). */
+  band?: BandReading | null;
 }
 
 /**
@@ -151,6 +154,62 @@ export function recentCallsLine(calls: readonly FadeCall[], symbol: string, bet:
   const vs = price / avg - 1;
   const where = Math.abs(vs) < 0.0005 ? "about the same" : `${Math.abs(vs * 100).toFixed(2)}% ${vs > 0 ? "higher" : "lower"}`;
   return `Avg ${bet} entry, last 24h: ${fmtPrice(avg)} (${recent.length} call${recent.length === 1 ? "" : "s"}) · now ${fmtPrice(price)}, ${where}.`;
+}
+
+/**
+ * Near the 24h low — the band filter from `analysis/band.ts`, as tested: an UP
+ * fade call whose signal-bar close sits in the bottom `prox` of the last 24h
+ * range, where that low has NOT been retested since it formed.
+ *
+ * Backtest (two 540-day windows, Dec 2023 → Nov 2026, live rule, BTC+ETH):
+ * these calls won 59.6% (n=1,250) against about 55% for the other fade calls.
+ * Above breakeven in 11 of 12 period thirds, but only 5 of 12 cleared the 95%
+ * floor, and Dec 2024 → Jun 2025 was flat (BTC 52.9%, ETH 51.6%). A tilt, not
+ * a proven edge on its own — so by default it tags alerts rather than blocking
+ * the others, which still win above breakeven.
+ */
+export interface NearLowFilter {
+  /** off = not computed · tag = mark matching alerts · only = send matching alerts only. */
+  mode: "off" | "tag" | "only";
+  band: BandParams;
+  /** Backtest win rates, for the alert and the report. */
+  backtest: { nearLow: number; other: number };
+}
+
+export const NEAR_LOW_FILTER: NearLowFilter = {
+  mode: "tag",
+  band: { ...DEFAULT_BAND_PARAMS, prox: 0.1, tol: 0.002 },
+  backtest: { nearLow: 0.596, other: 0.55 },
+};
+
+/** The 24h band as recorded on a call. */
+export interface BandReading {
+  /** Close's place in the 24h range: 0 = at the low, 1 = at the high. */
+  pos: number;
+  nearLow: boolean;
+  lowRetested: boolean;
+}
+
+/** The band at the signal bar (closing at `barClose`), or null without a full 24h of bars. */
+export function bandReading(candles: readonly Candle[], barClose: number, p: BandParams): BandReading | null {
+  const sorted = [...candles].sort((a, b) => a.openTime - b.openTime);
+  const i = sorted.findIndex((c) => c.closeTime === barClose);
+  if (i < 0) return null;
+  const s = bandAt(sorted, i, p);
+  return s === null ? null : { pos: s.pos, nearLow: s.nearLow, lowRetested: s.lowRetested };
+}
+
+/** Is this the tested near-low setup? Null when the band is unknown. */
+export function isNearLowCall(call: { bet: Dir; band?: BandReading | null }): boolean | null {
+  if (call.band === null || call.band === undefined) return null;
+  return call.bet === "UP" && call.band.nearLow && !call.band.lowRetested;
+}
+
+export function nearLowLine(f: NearLowFilter): string {
+  return (
+    `📍 Near the 24h low (bottom ${(f.band.prox * 100).toFixed(0)}% of the range): calls here won ${(f.backtest.nearLow * 100).toFixed(0)}% in testing ` +
+    `vs ~${(f.backtest.other * 100).toFixed(0)}% for the rest — the stronger setup, though not in every period.`
+  );
 }
 
 /** Did the confirm symbol join the move (same direction as the target, by at least `joinPct`)? */
@@ -282,6 +341,8 @@ export interface FadeWatchConfig {
   confirm: ConfirmCheck | null;
   /** Add the NY open caution to alerts (and sandwiches) fired 09:00–10:30 ET. */
   nyOpenCaution: boolean;
+  /** Near the 24h low: tag (or keep only) the stronger fade setups. Absent = off. */
+  nearLow?: NearLowFilter;
 }
 
 /** What the fade watch needs from the imbalance watch to explain a call going against you. */
@@ -604,9 +665,13 @@ export class FadeWatcher {
    */
   async tick(now: number): Promise<boolean> {
     const limit = this.cfg.params.windowBars + 4;
-    const [lead, ...targets] = await Promise.all(
-      [this.cfg.lead, ...this.cfg.targets].map((s) => this.fetch(s, this.cfg.interval, limit))
-    );
+    const nearLow = this.cfg.nearLow !== undefined && this.cfg.nearLow.mode !== "off" ? this.cfg.nearLow : null;
+    // The near-low check needs a full 24h of the target's bars.
+    const targetLimit = nearLow === null ? limit : Math.max(limit, nearLow.band.lookbackBars + 4);
+    const [lead, ...targets] = await Promise.all([
+      this.fetch(this.cfg.lead, this.cfg.interval, limit),
+      ...this.cfg.targets.map((s) => this.fetch(s, this.cfg.interval, targetLimit)),
+    ]);
     const expectedClose = Math.floor(now / this.barMs) * this.barMs - 1;
     const fresh = (cs: readonly Candle[]): boolean => cs.some((c) => c.closeTime === expectedClose);
     if (!fresh(lead!) || !targets.every(fresh)) return false;
@@ -644,7 +709,19 @@ export class FadeWatcher {
         console.log(`[fadewatch] ${symbol}: setup found ${lateSec}s after the close — too late to be the tested trade, skipped`);
         continue;
       }
+      // Set before the near-low check: the backtest counts one position at a
+      // time across ALL fade calls, then splits them by band.
       this.state.openUntil[symbol] = sig.barClose + holdMs;
+      const band = nearLow === null ? undefined : bandReading(candles, sig.barClose, nearLow.band);
+      const atLow = band === undefined ? null : isNearLowCall({ bet: sig.bet, band });
+      if (nearLow !== null) {
+        const where = band === null || band === undefined ? "24h band unknown" : `${(band.pos * 100).toFixed(0)}% up the 24h range${band.lowRetested ? ", low retested" : ""}`;
+        console.log(`[fadewatch] ${symbol}: ${where} → ${atLow === true ? "near the low" : "not the near-low setup"}`);
+        if (nearLow.mode === "only" && atLow !== true) {
+          console.log(`[fadewatch] ${symbol}: setup skipped — FADE_NEAR_LOW=only sends near-low calls only`);
+          continue;
+        }
+      }
       const alertPrice = candles[candles.length - 1]?.close ?? sig.signalClose;
       const holdMin = Math.round(holdMs / 60_000);
       const winMin = Math.round((this.cfg.params.windowBars * this.barMs) / 60_000);
@@ -665,6 +742,7 @@ export class FadeWatcher {
           (bt === undefined
             ? `Joint ${what} like this tend to reverse.\n`
             : `Joint ${what} like this ${did} ${(bt * 100).toFixed(0)}% of the time in testing (${(this.cfg.breakeven * 100).toFixed(1)}% needed to profit).\n`) +
+          (nearLow !== null && atLow === true ? `${nearLowLine(nearLow)}\n` : "") +
           (recentLine === null ? "" : `${recentLine}\n`) +
           stageLine(reading, this.cfg.confidence) +
           (this.cfg.nyOpenCaution && inNyOpenWindow(now) ? `\n${NY_OPEN_CAUTION}` : ""),
@@ -691,6 +769,7 @@ export class FadeWatcher {
         ownPct: sig.ownPct,
         ...(telegramMessageId === undefined ? {} : { telegramMessageId }),
         ...(confirm === null ? {} : { confirm: { symbol: confirm.symbol, pct: confirmPct } }),
+        ...(band === undefined ? {} : { band }),
       });
     }
     // Open calls going against you: one warning each, no daily cap.
@@ -809,6 +888,7 @@ export class FadeWatcher {
         ` · replies=${this.inbox === null ? "off" : "on"}` +
         ` · shadow=[${this.cfg.shadowRules.map((r) => r.id).join(",")}]` +
         ` · confirm=${this.cfg.confirm?.symbol ?? "off"}` +
+        ` · nearLow=${this.cfg.nearLow?.mode ?? "off"}` +
         ` · stage=${this.state.stage ?? "skeptical"} · sandwich=${this.cfg.sandwich.enabled ? `${(this.cfg.sandwich.dipPct * 100).toFixed(2)}%/${this.cfg.sandwich.withinMin}m` : "off"}`
     );
   }
@@ -923,6 +1003,9 @@ export function fadeWatchConfigFromEnv(opts: { lead: string; breakeven: number }
     sandwichesPath: raw("FADE_SANDWICHES_PATH") ?? "./data/fade-sandwiches.jsonl",
     // FADE_NY_CAUTION=off removes the NY open caution line.
     nyOpenCaution: (raw("FADE_NY_CAUTION") ?? "on").toLowerCase() !== "off",
+    // FADE_NEAR_LOW=tag (default) marks near-low alerts, =only sends nothing
+    // else, =off skips the check.
+    nearLow: { ...NEAR_LOW_FILTER, mode: nearLowMode(raw("FADE_NEAR_LOW")) },
     // Peeper 1.02. FADE_CONFIRM=off disables it.
     confirm:
       (raw("FADE_CONFIRM") ?? "on").toLowerCase() === "off"
@@ -933,6 +1016,13 @@ export function fadeWatchConfigFromEnv(opts: { lead: string; breakeven: number }
             joinPct: num("FADE_CONFIRM_PCT", MSTR_CONFIRM.joinPct * 100) / 100,
           },
   };
+}
+
+function nearLowMode(v: string | undefined): NearLowFilter["mode"] {
+  const m = (v ?? "tag").toLowerCase();
+  if (m === "off" || m === "only" || m === "tag") return m;
+  console.warn(`[fadewatch] FADE_NEAR_LOW=${v} not understood (use tag, only or off) — using tag`);
+  return "tag";
 }
 
 function sleep(ms: number, keepGoing: () => boolean): Promise<void> {

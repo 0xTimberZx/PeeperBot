@@ -470,3 +470,87 @@ describe("average entry of recent calls", () => {
     expect(sent[0]!.reason).toContain("Avg UP entry, last 24h: 100 (1 call) · now 99.5, 0.50% lower.");
   });
 });
+
+describe("near the 24h low", () => {
+  // A 6-bar "24h" band keeps the series short; the live filter uses 288 bars.
+  const nearLowCfg = async (mode: "tag" | "only" | "off") => {
+    const { NEAR_LOW_FILTER } = await import("./fadeWatch.js");
+    return { ...NEAR_LOW_FILTER, mode, band: { ...NEAR_LOW_FILTER.band, lookbackBars: 6, minGapBars: 2 } };
+  };
+  const lead = candles([100, 100, 100, 100, 100, 100, 98]); // −2% over the last 2 bars
+  // Signal close is the 6-bar low: bottom of the range, not retested.
+  const atLow = candles([102, 103, 104, 103, 100.2, 100, 99.8]);
+  // Signal close near the top of the range.
+  const atTop = candles([99, 99, 99, 99, 104, 104, 103.8]);
+  const at = 7 * BAR + 4000;
+
+  async function journaled(series: Record<string, Candle[]>, mode: "tag" | "only" | "off") {
+    const { mkdtempSync, readFileSync, existsSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const { tmpdir } = await import("node:os");
+    const path = join(mkdtempSync(join(tmpdir(), "fadenearlow-")), "j.jsonl");
+    const { w, sent } = watcher(series, { journalPath: path, nearLow: await nearLowCfg(mode) });
+    await w.tick(at);
+    const calls = existsSync(path) ? readFileSync(path, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l) as FadeCall) : [];
+    return { sent, calls };
+  }
+
+  it("reads the band at the signal bar, by bar time, and needs a full 24h", async () => {
+    const { bandReading, isNearLowCall } = await import("./fadeWatch.js");
+    const p = (await nearLowCfg("tag")).band;
+    const r = bandReading(atLow, atLow[6]!.closeTime, p)!;
+    expect(r.pos).toBe(0);
+    expect(r).toMatchObject({ nearLow: true, lowRetested: false });
+    expect(isNearLowCall({ bet: "UP", band: r })).toBe(true);
+    expect(isNearLowCall({ bet: "UP", band: { ...r, lowRetested: true } })).toBe(false); // the tested slice excludes retests
+    expect(isNearLowCall({ bet: "DOWN", band: r })).toBe(false);
+    expect(isNearLowCall({ bet: "UP", band: null })).toBeNull();
+    expect(isNearLowCall({ bet: "UP" })).toBeNull();
+    expect(bandReading(atLow.slice(3), atLow[6]!.closeTime, p)).toBeNull(); // fewer than 6 bars
+  });
+
+  it("tags an alert near the low and records the band on the call", async () => {
+    const { sent, calls } = await journaled({ COREUSDT: lead, BTCUSDT: atLow }, "tag");
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.reason).toContain("📍 Near the 24h low (bottom 10% of the range): calls here won 60% in testing vs ~55% for the rest");
+    expect(calls[0]!.band).toMatchObject({ pos: 0, nearLow: true, lowRetested: false });
+  });
+
+  it("still sends other calls in tag mode, untagged", async () => {
+    const { sent, calls } = await journaled({ COREUSDT: lead, BTCUSDT: atTop }, "tag");
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.reason).not.toContain("24h low");
+    expect(calls[0]!.band?.nearLow).toBe(false);
+  });
+
+  it("in only mode sends near-low calls and skips the rest", async () => {
+    expect((await journaled({ COREUSDT: lead, BTCUSDT: atLow }, "only")).sent).toHaveLength(1);
+    const skipped = await journaled({ COREUSDT: lead, BTCUSDT: atTop }, "only");
+    expect(skipped.sent).toHaveLength(0);
+    expect(skipped.calls).toHaveLength(0);
+  });
+
+  it("off: no tag and no band recorded", async () => {
+    const { sent, calls } = await journaled({ COREUSDT: lead, BTCUSDT: atLow }, "off");
+    expect(sent[0]!.reason).not.toContain("24h low");
+    expect(calls[0]!.band).toBeUndefined();
+  });
+
+  it("defaults to tag mode from env; FADE_NEAR_LOW=only / off switch it", async () => {
+    const { fadeWatchConfigFromEnv } = await import("./fadeWatch.js");
+    const prev = process.env["FADE_NEAR_LOW"];
+    try {
+      delete process.env["FADE_NEAR_LOW"];
+      const def = fadeWatchConfigFromEnv({ lead: "COREUSDT", breakeven: 0.526 }).nearLow!;
+      expect(def.mode).toBe("tag");
+      expect(def.band).toMatchObject({ lookbackBars: 288, prox: 0.1, tol: 0.002, minGapBars: 6 });
+      process.env["FADE_NEAR_LOW"] = "only";
+      expect(fadeWatchConfigFromEnv({ lead: "COREUSDT", breakeven: 0.526 }).nearLow!.mode).toBe("only");
+      process.env["FADE_NEAR_LOW"] = "OFF";
+      expect(fadeWatchConfigFromEnv({ lead: "COREUSDT", breakeven: 0.526 }).nearLow!.mode).toBe("off");
+    } finally {
+      if (prev === undefined) delete process.env["FADE_NEAR_LOW"];
+      else process.env["FADE_NEAR_LOW"] = prev;
+    }
+  });
+});
