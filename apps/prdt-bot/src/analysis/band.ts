@@ -141,6 +141,8 @@ export interface FadeBandSplit {
   byFifth: Bucket[];
   thirdsRetestedLow: { from: number; bucket: Bucket }[];
   thirdsNearLowNoRetest: { from: number; bucket: Bucket }[];
+  /** Fade calls in the top fifth of the band (the 80–100% row), by period third. */
+  thirdsTopFifth: { from: number; bucket: Bucket }[];
 }
 
 export interface BandReport {
@@ -197,6 +199,8 @@ export function analyzeBand(
       byFifth: [0, 1, 2, 3, 4].map((k) => bucket(sel((s) => Math.min(4, Math.floor(s.pos * 5)) === k))),
       thirdsRetestedLow: thirds(sel(isRetLow), firstTime, lastTime),
       thirdsNearLowNoRetest: thirds(sel(isNearLowNoRet), firstTime, lastTime),
+      // Same membership as the 80–100% byFifth row.
+      thirdsTopFifth: thirds(sel((s) => Math.min(4, Math.floor(s.pos * 5)) === 4), firstTime, lastTime),
     },
     standalone: {
       all: bucket(solo),
@@ -240,6 +244,8 @@ export function formatBand(r: BandReport, opts: { lead: string; target: string; 
     ...r.fade.thirdsRetestedLow.map((t, k) => R(`    ${["oldest", "middle", "newest"][k]} third (from ${day(t.from)})`, t.bucket)),
     "  near the 24h low, not retested, in each third of the period:",
     ...r.fade.thirdsNearLowNoRetest.map((t, k) => R(`    ${["oldest", "middle", "newest"][k]} third (from ${day(t.from)})`, t.bucket)),
+    "  top fifth of the band (80–100%), in each third of the period:",
+    ...r.fade.thirdsTopFifth.map((t, k) => R(`    ${["oldest", "middle", "newest"][k]} third (from ${day(t.from)})`, t.bucket)),
     "",
     `B. The band rule on its own (every 5m close, hold ${p.holdBars * 5}m, one at a time)`,
     R("all band trades", r.standalone.all),
