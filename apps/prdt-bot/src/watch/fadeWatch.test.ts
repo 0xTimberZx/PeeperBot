@@ -536,21 +536,101 @@ describe("near the 24h low", () => {
     expect(calls[0]!.band).toBeUndefined();
   });
 
-  it("defaults to tag mode from env; FADE_NEAR_LOW=only / off switch it", async () => {
+  it("defaults to only mode from env; FADE_NEAR_LOW=tag / off switch it", async () => {
     const { fadeWatchConfigFromEnv } = await import("./fadeWatch.js");
     const prev = process.env["FADE_NEAR_LOW"];
     try {
       delete process.env["FADE_NEAR_LOW"];
       const def = fadeWatchConfigFromEnv({ lead: "COREUSDT", breakeven: 0.526 }).nearLow!;
-      expect(def.mode).toBe("tag");
+      expect(def.mode).toBe("only");
       expect(def.band).toMatchObject({ lookbackBars: 288, prox: 0.1, tol: 0.002, minGapBars: 6 });
-      process.env["FADE_NEAR_LOW"] = "only";
-      expect(fadeWatchConfigFromEnv({ lead: "COREUSDT", breakeven: 0.526 }).nearLow!.mode).toBe("only");
+      process.env["FADE_NEAR_LOW"] = "tag";
+      expect(fadeWatchConfigFromEnv({ lead: "COREUSDT", breakeven: 0.526 }).nearLow!.mode).toBe("tag");
       process.env["FADE_NEAR_LOW"] = "OFF";
       expect(fadeWatchConfigFromEnv({ lead: "COREUSDT", breakeven: 0.526 }).nearLow!.mode).toBe("off");
     } finally {
       if (prev === undefined) delete process.env["FADE_NEAR_LOW"];
       else process.env["FADE_NEAR_LOW"] = prev;
+    }
+  });
+});
+
+describe("quiet mode and the top-of-range caution", () => {
+  const nl = async (mode: "tag" | "only") => {
+    const { NEAR_LOW_FILTER } = await import("./fadeWatch.js");
+    return { ...NEAR_LOW_FILTER, mode, band: { ...NEAR_LOW_FILTER.band, lookbackBars: 6, minGapBars: 2 } };
+  };
+  const lead = candles([100, 100, 100, 100, 100, 100, 98]);
+  const atLow = candles([102, 103, 104, 103, 100.2, 100, 99.8]);
+  const atTop = candles([99, 99, 99, 99, 104, 104, 103.8]);
+  const at = 7 * BAR + 4000;
+  const paths = async () => {
+    const { mkdtempSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const { tmpdir } = await import("node:os");
+    const dir = mkdtempSync(join(tmpdir(), "fadequiet-"));
+    return { journalPath: join(dir, "j.jsonl"), shadowJournalPath: join(dir, "s.jsonl") };
+  };
+  const lines = async (path: string): Promise<FadeCall[]> => {
+    const { existsSync, readFileSync } = await import("node:fs");
+    return existsSync(path) ? readFileSync(path, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l) as FadeCall) : [];
+  };
+
+  it("sends a two-line alert for a near-low call", async () => {
+    const { w, sent } = watcher({ COREUSDT: lead, BTCUSDT: atLow }, { ...(await paths()), nearLow: await nl("only"), quiet: true });
+    await w.tick(at);
+    const text = sent[0]!.reason;
+    expect(text.split("\n")).toHaveLength(2);
+    expect(text).toMatch(/^Enter now · settles ~\d\d:\d\d UTC \(sent 4s after the close\)\.\nCORE −2\.0% and BTC −0\.4% in 10 min, near the 24h low — won 60% in testing\.$/);
+  });
+
+  it("holds back other calls in only mode and logs them for the report", async () => {
+    const { SKIPPED_NOT_NEAR_LOW } = await import("./fadeWatch.js");
+    const p = await paths();
+    const { w, sent } = watcher({ COREUSDT: lead, BTCUSDT: atTop }, { ...p, nearLow: await nl("only"), quiet: true });
+    await w.tick(at);
+    expect(sent).toHaveLength(0);
+    expect(await lines(p.journalPath)).toHaveLength(0);
+    const held = await lines(p.shadowJournalPath);
+    expect(held).toHaveLength(1);
+    expect(held[0]!.rule).toBe(SKIPPED_NOT_NEAR_LOW);
+    expect(held[0]!.band?.nearLow).toBe(false);
+  });
+
+  it("cautions on a top-of-range call when every call is sent (tag mode), short or long", async () => {
+    const quiet = watcher({ COREUSDT: lead, BTCUSDT: atTop }, { nearLow: await nl("tag"), quiet: true });
+    await quiet.w.tick(at);
+    expect(quiet.sent[0]!.reason).toContain("⚠️ Top of the 24h range: the weakest spot in testing (49% won) — skip or bet smaller.");
+    expect(quiet.sent[0]!.reason).toContain("— won 56% in testing."); // the plain backtest rate, not the near-low one
+    const loud = watcher({ COREUSDT: lead, BTCUSDT: atTop }, { nearLow: await nl("tag") });
+    await loud.w.tick(at);
+    expect(loud.sent[0]!.reason).toContain("⚠️ Top of the 24h range");
+    const low = watcher({ COREUSDT: lead, BTCUSDT: atLow }, { nearLow: await nl("tag"), quiet: true });
+    await low.w.tick(at);
+    expect(low.sent[0]!.reason).not.toContain("Top of the 24h range");
+  });
+
+  it("sends no 'bet losing' warning while quiet", async () => {
+    const p = await paths();
+    const { w } = watcher({ COREUSDT: lead, BTCUSDT: atLow }, { ...p, againstPct: 0.003, quiet: true });
+    await w.tick(at);
+    expect(await w.warnAgainst(at + 60_000, { BTCUSDT: 90 })).toBe(0);
+    const loud = watcher({ COREUSDT: lead, BTCUSDT: atLow }, { ...(await paths()), againstPct: 0.003 });
+    await loud.w.tick(at);
+    expect(await loud.w.warnAgainst(at + 60_000, { BTCUSDT: 90 })).toBe(1);
+  });
+
+  it("is on by default; FADE_QUIET=off turns it off", async () => {
+    const { fadeWatchConfigFromEnv } = await import("./fadeWatch.js");
+    const prev = process.env["FADE_QUIET"];
+    try {
+      delete process.env["FADE_QUIET"];
+      expect(fadeWatchConfigFromEnv({ lead: "COREUSDT", breakeven: 0.526 }).quiet).toBe(true);
+      process.env["FADE_QUIET"] = "off";
+      expect(fadeWatchConfigFromEnv({ lead: "COREUSDT", breakeven: 0.526 }).quiet).toBe(false);
+    } finally {
+      if (prev === undefined) delete process.env["FADE_QUIET"];
+      else process.env["FADE_QUIET"] = prev;
     }
   });
 });

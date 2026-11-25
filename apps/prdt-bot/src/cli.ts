@@ -37,7 +37,7 @@ import {
 } from "./analysis/entryAutopsy.js";
 import { analyzeLeadLag, formatLeadLag, wilsonLower, DEFAULT_LEADLAG_PARAMS, type LeadLagParams } from "./analysis/leadLag.js";
 import { analyzeFade, formatFade, DEFAULT_FADE_PARAMS, type FadeParams, type FadeSide } from "./analysis/fade.js";
-import { FadeWatcher, FadeJournal, confirmJoined, fadeWatchConfigFromEnv, inNyOpenWindow, isNearLowCall, scoreFadeCalls } from "./watch/fadeWatch.js";
+import { FadeWatcher, FadeJournal, SKIPPED_NOT_NEAR_LOW, TOP_OF_RANGE, confirmJoined, fadeWatchConfigFromEnv, inNyOpenWindow, isNearLowCall, isTopOfRange, scoreFadeCalls, type FadeCall } from "./watch/fadeWatch.js";
 import { AaveHealthMonitor, aaveConfigFrom } from "./watch/aaveHealthRun.js";
 import { FadeOutcomeLog, TelegramInbox, callKey, formatRecord, latestOutcomes, withAutoMissed, yourRecord } from "./watch/fadeReplies.js";
 import { ImbalanceWatcher, imbalanceConfigFromEnv } from "./watch/imbalanceWatch.js";
@@ -800,7 +800,11 @@ async function cmdFadeWatch(flags: Map<string, string>): Promise<void> {
       direction: "UP",
       confidence: 0.56,
       entryPrice: 0,
-      reason: "TEST — a sample bet signal to check delivery. Nothing is live; don't bet on this.",
+      // Mirrors a quiet-mode near-low alert, so the test shows what a real call looks like.
+      reason:
+        "🧪 TEST — nothing is live, don't bet on this.\n" +
+        "Enter now · settles ~14:35 UTC (sent 4s after the close).\n" +
+        "CORE −2.1% and BTC −0.6% in 30 min, near the 24h low — won 60% in testing.",
       strategy: "fade-watch",
       live: false,
       ts: Date.now(),
@@ -882,17 +886,23 @@ async function cmdFadeWatch(flags: Map<string, string>): Promise<void> {
     // Near the 24h low: is the stronger setup still stronger live?
     const nl = watchCfg.nearLow;
     if (nl !== undefined && nl.mode !== "off") {
-      const settled = calls.filter((c) => score.byCall[callKey(c)] !== undefined);
-      const group = (atLow: boolean | null) => {
-        const g = settled.filter((c) => isNearLowCall(c) === atLow);
-        return { n: g.length, w: g.filter((c) => score.byCall[callKey(c)]).length };
+      // In "only" mode the other calls are not sent but logged to the shadow journal.
+      const held = new FadeJournal(watchCfg.shadowJournalPath ?? "./data/fade-shadow.jsonl").readAll().filter((c) => c.rule === SKIPPED_NOT_NEAR_LOW);
+      const heldScore = await scoreFadeCalls(held, Date.now(), priceAtSettle);
+      const won = (c: FadeCall): boolean | undefined => (c.rule === SKIPPED_NOT_NEAR_LOW ? heldScore.byCall : score.byCall)[callKey(c)];
+      const settled = [...calls, ...held].filter((c) => won(c) !== undefined);
+      const group = (f: (c: FadeCall) => boolean) => {
+        const g = settled.filter(f);
+        return { n: g.length, w: g.filter((c) => won(c)).length };
       };
-      const low = group(true), rest = group(false), unknown = group(null);
+      const low = group((c) => isNearLowCall(c) === true), rest = group((c) => isNearLowCall(c) === false), unknown = group((c) => isNearLowCall(c) === null);
+      const top = group((c) => isTopOfRange(c.band));
       const line = (label: string, g: { n: number; w: number }, bt: number) =>
         `  ${label.padEnd(30)} n=${String(g.n).padStart(4)}  ${g.n > 0 ? `win ${p(g.w / g.n)} (95% floor ${p(wilsonLower(g.w, g.n))})` : "—"}  · backtest ${p(bt)}`;
       console.log(`\nNear the 24h low — ${nl.mode === "only" ? "only these are sent" : "tagged on alerts"}`);
       console.log(line(`near the 24h low`, low, nl.backtest.nearLow));
-      console.log(line(`other fade calls`, rest, nl.backtest.other));
+      console.log(line(`other fade calls${nl.mode === "only" ? " (not sent)" : ""}`, rest, nl.backtest.other));
+      console.log(line(`  of which top of the 24h range`, top, TOP_OF_RANGE.backtest));
       if (unknown.n > 0) console.log(`  ${unknown.n} settled call(s) with no band reading (alerted before the filter, or not enough data)`);
       if (low.n < 100) console.log(`  Judge it at 100+ settled near-low calls (${low.n} so far); until then it's too few to tell from luck.`);
       else if (low.w / low.n > breakeven && (rest.n === 0 || low.w / low.n > rest.w / rest.n))
@@ -975,7 +985,8 @@ async function cmdFadeWatch(flags: Map<string, string>): Promise<void> {
   process.on("SIGINT", stopAll);
   process.on("SIGTERM", stopAll);
   const forMin = flags.get("for") === undefined ? undefined : Number(flags.get("for"));
-  await Promise.all([watcher.start(forMin), imbalance?.start(forMin)]);
+  // Quiet: the imbalance gap map is kept, but its daily callout isn't sent.
+  await Promise.all([watcher.start(forMin), watchCfg.quiet === true ? undefined : imbalance?.start(forMin)]);
 }
 
 /** Imbalance callouts on their own: --status prints the live gap map, --once scans (24h cap applies). */
