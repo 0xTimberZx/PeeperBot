@@ -14,11 +14,19 @@ const base: Alert = {
 };
 
 describe("formatAlert", () => {
-  it("renders a trade alert with the entry/direction/confidence line", () => {
+  it("renders a bet call as one plain line, then the reason — no job names or jargon", () => {
     const out = formatAlert(base);
-    expect(out).toContain("SIGNAL (dry-run)");
-    expect(out).toContain("UP @ 65000");
-    expect(out).toContain("confidence 70%");
+    expect(out.split("\n")[0]).toBe("🔔 BTC — bet UP, 15 min @ 65,000");
+    expect(out).toContain("some reason");
+    expect(out).not.toContain("spike-fade");
+    expect(out).not.toContain("dry-run");
+    expect(out).not.toContain("confidence");
+    expect(formatAlert({ ...base, live: true })).toContain("LIVE TRADE PLACED");
+  });
+
+  it("lets an info body with its own emoji headline stand alone", () => {
+    const out = formatAlert({ ...base, kind: "info", strategy: "fade-review", reason: "✅ WON · BTC UP" });
+    expect(out).toBe("✅ WON · BTC UP");
   });
 
   it("renders an info alert as a headline + body, no fake trade line", () => {
@@ -30,7 +38,7 @@ describe("formatAlert", () => {
       confidence: 0,
       reason: "CORE broke to a NEW LOW",
     });
-    expect(out).toContain("regime-monitor");
+    expect(out.split("\n")[0]).toBe("📡 Market mood · BTC"); // plain title, not the job name
     expect(out).toContain("CORE broke to a NEW LOW");
     // must NOT look like a broken trade signal
     expect(out).not.toContain("confidence");

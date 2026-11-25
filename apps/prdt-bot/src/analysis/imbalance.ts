@@ -233,35 +233,34 @@ export function gapStats(gaps: readonly Gap[], fine: readonly Candle[], tf: GapT
 
 const fmtPrice = (x: number): string =>
   x.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: x >= 1000 ? 0 : x >= 1 ? 2 : 5 });
-const fmtDay = (t: number): string => new Date(t).toISOString().slice(5, 10);
+const fmtDay = (t: number): string => new Date(t).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
 const span = (h: number): string => (h * 4 >= 48 ? `${(h * 4) / 24} days` : `${h * 4}h`);
 
+/**
+ * A gap (imbalance) in plain words: a zone price skipped through fast, which it
+ * often comes back to. "4h" / "daily" is the candle size it formed on.
+ */
 export function describeGap(s: GapState): string {
-  const kind = s.dir === "bull" ? "bullish" : "bearish";
-  return `${s.tf === "1d" ? "daily" : "4h"} ${kind} imbalance ${fmtPrice(s.low)}–${fmtPrice(s.high)} (formed ${fmtDay(s.formedAt)})`;
+  return `unfilled ${s.tf === "1d" ? "daily" : "4h"} gap ${fmtPrice(s.low)}–${fmtPrice(s.high)} (from ${fmtDay(s.formedAt)})`;
 }
 
 export function describeStats(st: GapStats | undefined, symbol: string): string {
-  if (st === undefined || st.n === 0) return `History: no past fast first-touches of ${st?.tf ?? ""} gaps on ${symbol} to compare with.`;
-  const pc = (k: number): string => `${Math.round((k / st.n) * 100)}%`;
-  return (
-    `History (${symbol}, same setup on ${st.tf} gaps): ${st.reachedHalf} of ${st.n} reached halfway (${pc(st.reachedHalf)}), ` +
-    `${st.reachedEnd} of ${st.n} reached the end (${pc(st.reachedEnd)}) within ${span(st.horizonBars)}.`
-  );
+  if (st === undefined || st.n === 0) return `No past cases on ${symbol.replace(/USDT$/, "")} to compare with.`;
+  return `Past cases: ${st.reachedHalf} of ${st.n} reached halfway, ${st.reachedEnd} of ${st.n} the far end, within ${span(st.horizonBars)}.`;
 }
 
 /** The once-a-day callout. */
 export function formatApproach(symbol: string, a: Approach, stats: GapStats | undefined): string {
-  const verb = a.heading === "down" ? "descending" : "climbing";
-  const sign = a.move4hPct >= 0 ? "+" : "";
+  const sym = symbol.replace(/USDT$/, "");
+  const sign = a.move4hPct >= 0 ? "+" : "−";
   const lines = [
-    `📐 ${symbol} ${verb} fast into a ${describeGap(a.gap)}`,
-    `Price ${fmtPrice(a.price)} · ${sign}${(a.move4hPct * 100).toFixed(1)}% in 4h (${a.pace.toFixed(1)}× a normal 4h range) · first touch`,
-    `End of the imbalance: ${fmtPrice(a.end)} · halfway ${fmtPrice(a.half)}`,
+    `📐 ${sym} ${a.heading === "down" ? "falling" : "rising"} fast toward an ${describeGap(a.gap)}`,
+    `${sign}${Math.abs(a.move4hPct * 100).toFixed(1)}% in 4h (${a.pace.toFixed(1)}× a normal 4h move), now ${fmtPrice(a.price)}. ` +
+      `Halfway ${fmtPrice(a.half)} · far end ${fmtPrice(a.end)}.`,
+    describeStats(stats, symbol),
   ];
-  if (a.next) lines.push(`If it runs through: next ${describeGap(a.next)}`);
-  lines.push(describeStats(stats, symbol));
-  lines.push("Info only — a level and its odds, not a trade signal. Next callout no sooner than 24h.");
+  if (a.next) lines.push(`If it runs through: another ${describeGap(a.next)}.`);
+  lines.push("Info only, not a bet signal. At most one of these a day.");
   return lines.join("\n");
 }
 

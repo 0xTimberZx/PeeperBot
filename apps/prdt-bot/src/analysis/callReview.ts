@@ -17,6 +17,9 @@ export type Grade = "clean-win" | "scraped-win" | "narrow-loss" | "gave-it-back"
 
 export const GRADES: readonly Grade[] = ["clean-win", "scraped-win", "narrow-loss", "gave-it-back", "loss", "blowout"];
 
+/** A signed percentage with a real minus sign: +0.33%, −0.81%. */
+const signed = (x: number): string => `${x >= 0 ? "+" : "−"}${Math.abs(x * 100).toFixed(2)}%`;
+
 export const GRADE_LABEL: Record<Grade, string> = {
   "clean-win": "clean win",
   "scraped-win": "scraped a win",
@@ -136,38 +139,42 @@ export function reviewCall(opts: {
   };
 }
 
-const pct = (x: number): string => `${x >= 0 ? "+" : "−"}${Math.abs(x * 100).toFixed(2)}%`;
-
 /** One plain-English line on what the lead asset did during the hold. */
 export function leadLine(r: CallReview, opts: { lead: string; target: string; bet: Dir; leadMovePct: number }): string | null {
   if (r.leadHoldPct === null) return null;
   const lead = opts.lead.replace("USDT", "");
   const target = opts.target.replace("USDT", "");
+  const mv = signed(r.leadHoldPct);
   // The setup fades a move; "kept going" means the lead extended that move.
   const moveSign = opts.bet === "UP" ? -1 : 1;
   const along = r.leadHoldPct * moveSign;
   const half = opts.leadMovePct / 2;
   const won = r.finalPct > 0;
-  if (along >= half) {
-    const verb = moveSign < 0 ? "kept falling" : "kept rising";
-    const what = moveSign < 0 ? "dump" : "pump";
-    return `${lead} ${verb}: ${pct(r.leadHoldPct)} more during the hold — the ${what} hadn't finished.`;
-  }
+  if (along >= half) return `${lead} kept ${moveSign < 0 ? "falling" : "rising"} (${mv}) — the ${moveSign < 0 ? "drop" : "pump"} hadn't finished.`;
   if (along <= -half) {
     const verb = moveSign < 0 ? "bounced" : "pulled back";
-    return won ? `${lead} ${verb} ${pct(r.leadHoldPct)} and ${target} followed.` : `${lead} ${verb} ${pct(r.leadHoldPct)}, but ${target} didn't follow.`;
+    return won ? `${lead} ${verb} (${mv}) and ${target} followed.` : `${lead} ${verb} (${mv}), but ${target} didn't follow.`;
   }
-  return `${lead} was roughly flat during the hold (${pct(r.leadHoldPct)}).`;
+  // In between: state the number, and only call it flat when it really was.
+  return Math.abs(r.leadHoldPct) < 0.002 ? `${lead} was flat during the bet (${mv}).` : `${lead} moved ${mv} during the bet.`;
 }
 
-/** The facts behind the grade, two or three short lines. */
+/** Message headline per grade: the result first, the nuance in brackets. */
+export const RESULT_HEADLINE: Record<Grade, string> = {
+  "clean-win": "✅ WON",
+  "scraped-win": "✅ WON (barely)",
+  "narrow-loss": "❌ LOST (barely)",
+  "gave-it-back": "❌ LOST (was ahead, gave it back)",
+  loss: "❌ LOST",
+  blowout: "❌ LOST badly",
+};
+
+/** The facts behind the grade, on one line. */
 export function reviewLines(r: CallReview): string[] {
-  const sigma = (x: number): string => (r.typicalPct > 0 ? ` (${Math.abs(x / r.typicalPct).toFixed(1)}× a typical 30m move)` : "");
-  const lines: string[] = [];
-  if (r.grade === "blowout") lines.push(`Never ahead: best ${pct(Math.max(0, r.bestPct))}, settled ${pct(r.finalPct)}${sigma(r.finalPct)}.`);
-  else if (r.grade === "gave-it-back") lines.push(`Was ahead ${pct(r.bestPct)} at minute ${r.bestAtMin}, settled ${pct(r.finalPct)}.`);
-  else lines.push(`Settled ${pct(r.finalPct)}${sigma(r.finalPct)} · best ${pct(Math.max(0, r.bestPct))} · worst ${pct(Math.min(0, r.worstPct))}.`);
-  if (r.grade === "blowout" || r.grade === "loss") lines.push(`Worst point ${pct(r.worstPct)} at minute ${r.worstAtMin}.`);
-  lines.push(`On the winning side for ${r.minutesAhead} of ${r.minutesTotal} minutes.`);
-  return lines;
+  const parts = [`${signed(r.finalPct)} at settle`];
+  if (r.grade === "blowout") parts.push("never ahead", `worst ${signed(r.worstPct)} at min ${r.worstAtMin}`);
+  else if (r.grade === "gave-it-back") parts.push(`was ${signed(r.bestPct)} at min ${r.bestAtMin}`);
+  else parts.push(`best ${signed(Math.max(0, r.bestPct))}`, `worst ${signed(Math.min(0, r.worstPct))}`);
+  parts.push(`ahead ${r.minutesAhead} of ${r.minutesTotal} min`);
+  return [parts.join(" · ")];
 }

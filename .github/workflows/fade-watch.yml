@@ -40,6 +40,14 @@ name: Fade watch
 # Sandwich setups are logged to data/fade-sandwiches.jsonl either way.
 # FADE_SANDWICH=off disables them entirely.
 #
+# Quiet (default): only fade calls near the 24h low are sent, in two lines;
+# the others are logged to data/fade-shadow.jsonl and scored by --report.
+# "Bet losing" warnings, review replies and stage-change messages are logged
+# but not sent. The daily imbalance callout still is (IMBALANCE_OFF=1 stops
+# it). Variables: FADE_QUIET=off brings
+# them all back; FADE_NEAR_LOW=tag sends every call (near-low ones marked,
+# top-of-range ones cautioned), =off drops the band check.
+#
 # Reviews: when a call settles, the bot replies under the alert with how it
 # played out — clean win, narrow loss, gave it back, or a complete blowout.
 #
@@ -54,10 +62,13 @@ name: Fade watch
 # Imbalance callout: the same job scans BTC/ETH every 15 min and, at most once
 # per 24h (IMBALANCE_CAP_HOURS), calls out a fast move into a fresh 4h/daily
 # imbalance with its end level and historical odds. IMBALANCE_OFF=1 disables.
+# Its prices come from KuCoin, then Gate.io, then OKX (IMBALANCE_FEED to change).
 #
 # State: the open-call latch, the alert journal and your replies live in apps/prdt-bot/data
-# and are carried between jobs by actions/cache. The journal is also uploaded as
-# an artifact on every run, and the live record is printed at the end of each job.
+# and are carried between jobs by actions/cache (the folder as one path, so new
+# data files never reset it). The folder is also uploaded as an artifact on every
+# run; on a cache miss the next job rebuilds the history from those uploads. The
+# live record is printed at the end of each job.
 #
 # Secrets (same as the other watchers): TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID.
 # Variables (optional): FADE_TARGETS (default BTCUSDT,ETHUSDT),
@@ -93,22 +104,48 @@ jobs:
         with:
           node-version: 20
           cache: npm
+      # The whole data folder is cached as ONE path. GitHub ties a cache to its
+      # exact path list, so listing files one by one meant every new data file
+      # silently started an empty history. A folder never changes, whatever the
+      # bot writes into it.
       - name: Restore latch + journal
+        id: restore
         uses: actions/cache/restore@v4
         with:
-          path: |
-            apps/prdt-bot/data/fadewatch-state.json
-            apps/prdt-bot/data/fade-journal.jsonl
-            apps/prdt-bot/data/fade-outcomes.jsonl
-            apps/prdt-bot/data/fade-reviews.jsonl
-            apps/prdt-bot/data/imbalance-state.json
-            apps/prdt-bot/data/fade-shadow.jsonl
-            apps/prdt-bot/data/fade-sandwiches.jsonl
-          key: fade-watch-${{ github.run_id }}
+          path: apps/prdt-bot/data
+          key: fade-data-${{ github.run_id }}
           restore-keys: |
-            fade-watch-
+            fade-data-
       - name: Install dependencies
         run: npm ci
+      # Safety net: on a cache miss (evicted, or the cache layout changed), rebuild
+      # the history from the journal uploaded by the latest run, plus RECOVER_RUNS
+      # (older runs whose history was cut off by earlier cache misses). Merging is
+      # de-duplicated, so it is harmless to run more than once.
+      - name: Recover history on a cache miss
+        if: steps.restore.outputs.cache-matched-key == '' && github.event.inputs.test != 'true'
+        continue-on-error: true
+        working-directory: apps/prdt-bot
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RECOVER_RUNS: "45072147140 45090896236"
+        run: |
+          mkdir -p data recovered
+          latest=""
+          for id in $(gh run list -R "$GITHUB_REPOSITORY" --workflow fade-watch.yml --status completed --limit 15 --json databaseId -q '.[].databaseId'); do
+            if gh run download "$id" -R "$GITHUB_REPOSITORY" -n fade-journal -D "recovered/$id" 2>/dev/null; then latest=$id; break; fi
+          done
+          for id in $RECOVER_RUNS; do
+            [ "$id" = "$latest" ] && continue
+            gh run download "$id" -R "$GITHUB_REPOSITORY" -n fade-journal -D "recovered/$id" || echo "::warning::no journal artifact for run $id"
+          done
+          if ls -d recovered/*/ >/dev/null 2>&1; then
+            # Latest first, so its state files win over older ones.
+            npx tsx src/watch/mergeData.ts data $( [ -n "$latest" ] && echo "recovered/$latest" ) $(ls -d recovered/*/ | grep -v "recovered/$latest/")
+          else
+            echo "::warning::cache miss and no journal artifact found - starting a fresh history"
+          fi
+          rm -rf recovered
       # Grade any settled call the last job didn't get to (no messages sent).
       - name: Review past calls
         if: github.event.inputs.test != 'true' && github.event.inputs.report != 'true'
@@ -134,6 +171,7 @@ jobs:
           IMBALANCE_TARGETS: ${{ vars.IMBALANCE_TARGETS }}
           IMBALANCE_CAP_HOURS: ${{ vars.IMBALANCE_CAP_HOURS }}
           IMBALANCE_OFF: ${{ vars.IMBALANCE_OFF }}
+          IMBALANCE_FEED: ${{ vars.IMBALANCE_FEED }}
           FADE_SHADOW: ${{ vars.FADE_SHADOW }}
           FADE_SANDWICH: ${{ vars.FADE_SANDWICH }}
           FADE_SANDWICH_DIP_PCT: ${{ vars.FADE_SANDWICH_DIP_PCT }}
@@ -144,6 +182,8 @@ jobs:
           FADE_CONFIRM_SYMBOL: ${{ vars.FADE_CONFIRM_SYMBOL }}
           FADE_CONFIRM_PCT: ${{ vars.FADE_CONFIRM_PCT }}
           FADE_NY_CAUTION: ${{ vars.FADE_NY_CAUTION }}
+          FADE_QUIET: ${{ vars.FADE_QUIET }}
+          FADE_NEAR_LOW: ${{ vars.FADE_NEAR_LOW }}
         run: |
           if [ "${{ github.event.inputs.test }}" = "true" ]; then
             npm run fadewatch --workspace=apps/prdt-bot -- --test
@@ -162,27 +202,14 @@ jobs:
         if: always()
         uses: actions/cache/save@v4
         with:
-          path: |
-            apps/prdt-bot/data/fadewatch-state.json
-            apps/prdt-bot/data/fade-journal.jsonl
-            apps/prdt-bot/data/fade-outcomes.jsonl
-            apps/prdt-bot/data/fade-reviews.jsonl
-            apps/prdt-bot/data/imbalance-state.json
-            apps/prdt-bot/data/fade-shadow.jsonl
-            apps/prdt-bot/data/fade-sandwiches.jsonl
-          key: fade-watch-${{ github.run_id }}
+          path: apps/prdt-bot/data
+          key: fade-data-${{ github.run_id }}
       - name: Upload journal
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: fade-journal
-          path: |
-            apps/prdt-bot/data/fade-journal.jsonl
-            apps/prdt-bot/data/fade-outcomes.jsonl
-            apps/prdt-bot/data/fade-reviews.jsonl
-            apps/prdt-bot/data/imbalance-state.json
-            apps/prdt-bot/data/fade-shadow.jsonl
-            apps/prdt-bot/data/fade-sandwiches.jsonl
+          path: apps/prdt-bot/data
           if-no-files-found: ignore
       # Last step on purpose: the successor queues behind this job and starts
       # seconds after it exits. Skipped for test/report runs and when cancelled.

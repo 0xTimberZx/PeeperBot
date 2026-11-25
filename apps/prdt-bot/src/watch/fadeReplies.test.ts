@@ -43,7 +43,7 @@ describe("handleReplies", () => {
   it("logs a reply against the alert it answers and acknowledges with the record", () => {
     const [a] = handleReplies([msg("won", { replyToMessageId: 11 })], [btc, eth], [], CHAT);
     expect(a!.outcome).toMatchObject({ symbol: "ETHUSDT", barClose: eth.barClose, outcome: "won" });
-    expect(a!.text).toContain("Logged WON · ETHUSDT UP");
+    expect(a!.text).toContain("Logged WON · ETH UP");
     expect(a!.text).toContain("Your record: 1 won · 0 lost · 0 missed — 100% of the 1 you took");
   });
 

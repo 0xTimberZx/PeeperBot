@@ -3,7 +3,8 @@
 // are the preferred source. But Binance.com geo-blocks some regions/cloud IPs
 // with HTTP 451 (GitHub Codespaces, many CI runners), so this module is
 // MULTI-SOURCE with automatic fallback: it tries Binance, then OKX, then Bybit,
-// normalizing every exchange's kline shape to the same `Candle`. For a 30-min
+// normalizing every exchange's kline shape to the same `Candle`. KuCoin and Gate.io
+// are also available (used first by the imbalance watcher: few, large pages). For a 30-min
 // BTC round the direction (entry vs expiry) agrees across venues to the cent —
 // arbitrage keeps majors within pennies — so a fallback source is a faithful
 // stand-in for backtesting and signalling when Binance is unreachable.
@@ -68,10 +69,22 @@ function splitSymbol(symbol: string): { base: string; quote: string } {
   return { base: s, quote: "USDT" };
 }
 
+/** Waits between retries on HTTP 429 (rate limited). Tests set it to [0, 0]. */
+export const RATE_LIMIT_BACKOFF_MS: number[] = [1000, 2500];
+
 async function getJson(url: string): Promise<unknown> {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
-  return res.json();
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(url);
+    // A burst of history pages can trip a per-second limit: wait and retry a
+    // couple of times instead of failing the whole fetch.
+    const wait = RATE_LIMIT_BACKOFF_MS[attempt];
+    if (res.status === 429 && wait !== undefined) {
+      await new Promise((r) => setTimeout(r, wait));
+      continue;
+    }
+    if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+    return res.json();
+  }
 }
 
 // --- Binance ---
@@ -211,20 +224,112 @@ const bybitSource: ExchangeSource = {
   },
 };
 
+// --- KuCoin (spot; up to 1500 bars per request, newest-first; times in seconds) ---
+const KUCOIN_TYPE: Record<Interval, string> = {
+  "1m": "1min",
+  "3m": "3min",
+  "5m": "5min",
+  "15m": "15min",
+  "30m": "30min",
+  "1h": "1hour",
+  "4h": "4hour",
+  "1d": "1day",
+};
+const kucoinSource: ExchangeSource = {
+  name: "kucoin",
+  maxLimit: 1500,
+  async fetchPage({ symbol, interval, endTime, limit }) {
+    const { base, quote } = splitSymbol(symbol);
+    const step = intervalMs(interval);
+    const n = Math.min(limit, 1500);
+    // Window by bar start: the last bar opens at or before endTime.
+    const lastOpen = Math.floor(endTime / step) * step;
+    const params = new URLSearchParams({
+      type: KUCOIN_TYPE[interval],
+      symbol: `${base}-${quote}`,
+      startAt: String(Math.floor((lastOpen - (n - 1) * step) / 1000)),
+      endAt: String(Math.floor(lastOpen / 1000) + 1),
+    });
+    const json = (await getJson(`https://api.kucoin.com/api/v1/market/candles?${params}`)) as {
+      code: string;
+      msg?: string;
+      data?: string[][];
+    };
+    if (json.code !== "200000") throw new Error(`KuCoin code ${json.code} ${json.msg ?? ""}`.trim());
+    // rows: [time(s), open, close, high, low, volume, turnover], newest-first
+    return (json.data ?? [])
+      .map((r) => {
+        const openTime = Number(r[0]) * 1000;
+        return {
+          openTime,
+          open: Number(r[1]),
+          high: Number(r[3]),
+          low: Number(r[4]),
+          close: Number(r[2]),
+          volume: Number(r[5]),
+          closeTime: openTime + step - 1,
+        };
+      })
+      .filter((c) => c.openTime <= endTime)
+      .sort((a, b) => a.openTime - b.openTime)
+      .slice(-n);
+  },
+};
+
+// --- Gate.io (spot; up to 1000 bars per request, oldest-first; times in seconds) ---
+const gateSource: ExchangeSource = {
+  name: "gate",
+  maxLimit: 1000,
+  async fetchPage({ symbol, interval, endTime, limit }) {
+    const { base, quote } = splitSymbol(symbol);
+    const step = intervalMs(interval);
+    const params = new URLSearchParams({
+      currency_pair: `${base}_${quote}`,
+      interval,
+      to: String(Math.floor(endTime / 1000)),
+      limit: String(Math.min(limit, 1000)),
+    });
+    const body = (await getJson(`https://api.gateio.ws/api/v4/spot/candlesticks?${params}`)) as unknown;
+    if (!Array.isArray(body)) throw new Error(`Gate: unexpected response`);
+    // rows: [time(s), quote volume, close, high, low, open, base volume, closed]
+    return (body as string[][])
+      .map((r) => {
+        const openTime = Number(r[0]) * 1000;
+        return {
+          openTime,
+          open: Number(r[5]),
+          high: Number(r[3]),
+          low: Number(r[4]),
+          close: Number(r[2]),
+          volume: Number(r[6]),
+          closeTime: openTime + step - 1,
+        };
+      })
+      .filter((c) => c.openTime <= endTime)
+      .sort((a, b) => a.openTime - b.openTime);
+  },
+};
+
 export const SOURCES: Record<string, ExchangeSource> = {
   binance: binanceSource,
   okx: okxSource,
   bybit: bybitSource,
+  kucoin: kucoinSource,
+  gate: gateSource,
 };
 
-/** Ordered, de-duplicated source chain from FEED_SOURCE + FEED_FALLBACKS. */
-export function resolveChain(): ExchangeSource[] {
+/**
+ * Ordered, de-duplicated source chain: `names` if given (a caller's own chain,
+ * e.g. the imbalance watcher's), else FEED_SOURCE + FEED_FALLBACKS.
+ */
+export function resolveChain(names?: readonly string[]): ExchangeSource[] {
   const primary = (process.env.FEED_SOURCE ?? "binance").trim().toLowerCase();
   const fallbacks = (process.env.FEED_FALLBACKS ?? "okx,bybit")
     .split(",")
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean);
-  const names = [primary, ...fallbacks].filter((n, i, a) => a.indexOf(n) === i);
+  const wanted = names !== undefined && names.length > 0 ? names.map((n) => n.trim().toLowerCase()) : [primary, ...fallbacks];
+  names = wanted.filter((n, i, a) => n !== "" && a.indexOf(n) === i);
   const chain = names.map((n) => SOURCES[n]).filter((s): s is ExchangeSource => s !== undefined);
   return chain.length > 0 ? chain : [binanceSource];
 }
@@ -254,8 +359,12 @@ async function pageBackward(
 }
 
 /** Run `fn` against each source in the chain, falling through on any failure. */
-async function withFallback<T>(fn: (s: ExchangeSource) => Promise<T>, nonEmpty: (t: T) => boolean): Promise<T> {
-  const chain = resolveChain();
+async function withFallback<T>(
+  fn: (s: ExchangeSource) => Promise<T>,
+  nonEmpty: (t: T) => boolean,
+  sources?: readonly string[]
+): Promise<T> {
+  const chain = resolveChain(sources);
   const errors: string[] = [];
   for (let i = 0; i < chain.length; i++) {
     const source = chain[i];
@@ -308,11 +417,14 @@ export async function fetchHistory(opts: {
   interval: Interval;
   count: number;
   endTime?: number;
+  /** Source chain for this call; default FEED_SOURCE + FEED_FALLBACKS. */
+  sources?: readonly string[];
 }): Promise<Candle[]> {
   const end = opts.endTime ?? Date.now();
   return withFallback(
     (source) => pageBackward(source, opts.symbol, opts.interval, opts.count, end),
-    (out) => out.length > 0
+    (out) => out.length > 0,
+    opts.sources
   );
 }
 

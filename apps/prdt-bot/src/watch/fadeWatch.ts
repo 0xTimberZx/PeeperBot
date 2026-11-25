@@ -16,6 +16,7 @@ import { dirname } from "node:path";
 import { fetchKlines, intervalMs, type Candle, type Interval } from "../feed/binance.js";
 import { AlertDispatcher, type Alert } from "../alerts.js";
 import { DEFAULT_FADE_PARAMS, type FadeParams } from "../analysis/fade.js";
+import { bandAt, DEFAULT_BAND_PARAMS, type BandParams } from "../analysis/band.js";
 import { wilsonLower } from "../analysis/leadLag.js";
 import type { Dir } from "../analysis/prdtJournal.js";
 import { FadeOutcomeLog, callKey, handleReplies, latestOutcomes, TelegramError, type TelegramInbox } from "./fadeReplies.js";
@@ -83,6 +84,8 @@ export interface FadeCall {
   rule?: string;
   /** Peeper 1.02: the confirm symbol's move over the same window (null = no data). */
   confirm?: { symbol: string; pct: number | null };
+  /** The 24h band at the signal bar (null = not enough data; absent = filter off or older call). */
+  band?: BandReading | null;
 }
 
 /**
@@ -136,8 +139,96 @@ export function inNyOpenWindow(ts: number): boolean {
 }
 
 export const NY_OPEN_CAUTION =
-  "⚠️ NY open (09:00–10:30 ET): this alert has been only breakeven here — 52.7% over 165 backtest trades (42 / 66 / 44% by period) " +
-  "vs 57% at other times. Moves at the open tend to keep going. Consider skipping it or betting smaller.";
+  "⚠️ NY open (09:00–10:30 ET): no real edge at this hour in testing (53% won vs 57% other times) — moves here tend to keep going. Skip or bet smaller.";
+
+/**
+ * The average entry price of this coin's calls in the same direction over the
+ * last 24 hours (before `now`), next to the current price — so you can see if
+ * this entry is higher or lower than the bot's recent calls.
+ */
+export function recentCallsLine(calls: readonly FadeCall[], symbol: string, bet: Dir, price: number, now: number): string {
+  const sym = symbol.replace(/USDT$/, "");
+  const recent = calls.filter((c) => c.symbol === symbol && c.bet === bet && c.rule === undefined && c.ts < now && now - c.ts <= 86_400_000 && c.alertPrice > 0);
+  if (recent.length === 0) return `First ${bet} call on ${sym} in the last 24h.`;
+  const avg = recent.reduce((a, c) => a + c.alertPrice, 0) / recent.length;
+  const vs = price / avg - 1;
+  const where = Math.abs(vs) < 0.0005 ? "about the same" : `${Math.abs(vs * 100).toFixed(2)}% ${vs > 0 ? "higher" : "lower"}`;
+  return `Avg ${bet} entry, last 24h: ${fmtPrice(avg)} (${recent.length} call${recent.length === 1 ? "" : "s"}) · now ${fmtPrice(price)}, ${where}.`;
+}
+
+/**
+ * Near the 24h low — the band filter from `analysis/band.ts`, as tested: an UP
+ * fade call whose signal-bar close sits in the bottom `prox` of the last 24h
+ * range, where that low has NOT been retested since it formed.
+ *
+ * Backtest (two 540-day windows, Dec 2023 → Nov 2026, live rule, BTC+ETH):
+ * these calls won 59.6% (n=1,250) against about 55% for the other fade calls.
+ * Above breakeven in 11 of 12 period thirds, but only 5 of 12 cleared the 95%
+ * floor, and Dec 2024 → Jun 2025 was flat (BTC 52.9%, ETH 51.6%). A tilt, not
+ * a proven edge on its own — so by default it tags alerts rather than blocking
+ * the others, which still win above breakeven.
+ */
+export interface NearLowFilter {
+  /** off = not computed · tag = mark matching alerts · only = send matching alerts only. */
+  mode: "off" | "tag" | "only";
+  band: BandParams;
+  /** Backtest win rates, for the alert and the report. */
+  backtest: { nearLow: number; other: number };
+}
+
+export const NEAR_LOW_FILTER: NearLowFilter = {
+  mode: "only",
+  band: { ...DEFAULT_BAND_PARAMS, prox: 0.1, tol: 0.002 },
+  backtest: { nearLow: 0.596, other: 0.55 },
+};
+
+/** The 24h band as recorded on a call. */
+export interface BandReading {
+  /** Close's place in the 24h range: 0 = at the low, 1 = at the high. */
+  pos: number;
+  nearLow: boolean;
+  lowRetested: boolean;
+}
+
+/** The band at the signal bar (closing at `barClose`), or null without a full 24h of bars. */
+export function bandReading(candles: readonly Candle[], barClose: number, p: BandParams): BandReading | null {
+  const sorted = [...candles].sort((a, b) => a.openTime - b.openTime);
+  const i = sorted.findIndex((c) => c.closeTime === barClose);
+  if (i < 0) return null;
+  const s = bandAt(sorted, i, p);
+  return s === null ? null : { pos: s.pos, nearLow: s.nearLow, lowRetested: s.lowRetested };
+}
+
+/** Is this the tested near-low setup? Null when the band is unknown. */
+export function isNearLowCall(call: { bet: Dir; band?: BandReading | null }): boolean | null {
+  if (call.band === null || call.band === undefined) return null;
+  return call.bet === "UP" && call.band.nearLow && !call.band.lowRetested;
+}
+
+/**
+ * Top of the 24h range: fade calls whose signal bar closed in the top fifth.
+ * Backtest (same two 540-day windows, BTC+ETH): 48.6% won (n=356) — the
+ * weakest slice, below breakeven — but mixed by period third (7 of 12 below
+ * breakeven, 5 above, all on small samples), so it earns a caution, not a skip.
+ * Only seen when near-low calls are not the only ones sent.
+ */
+export const TOP_OF_RANGE = { minPos: 0.8, backtest: 0.486 };
+
+/** Shadow-journal rule id for fade calls held back because they weren't near the 24h low. */
+export const SKIPPED_NOT_NEAR_LOW = "not-near-low";
+
+export function isTopOfRange(band: BandReading | null | undefined): boolean {
+  return band !== null && band !== undefined && band.pos >= TOP_OF_RANGE.minPos;
+}
+
+export const TOP_OF_RANGE_CAUTION = `⚠️ Top of the 24h range: the weakest spot in testing (${(TOP_OF_RANGE.backtest * 100).toFixed(0)}% won) — skip or bet smaller.`;
+
+export function nearLowLine(f: NearLowFilter): string {
+  return (
+    `📍 Near the 24h low (bottom ${(f.band.prox * 100).toFixed(0)}% of the range): calls here won ${(f.backtest.nearLow * 100).toFixed(0)}% in testing ` +
+    `vs ~${(f.backtest.other * 100).toFixed(0)}% for the rest — the stronger setup, though not in every period.`
+  );
+}
 
 /** Did the confirm symbol join the move (same direction as the target, by at least `joinPct`)? */
 export function confirmJoined(call: Pick<FadeCall, "bet" | "confirm">, joinPct: number): boolean | null {
@@ -268,6 +359,14 @@ export interface FadeWatchConfig {
   confirm: ConfirmCheck | null;
   /** Add the NY open caution to alerts (and sandwiches) fired 09:00–10:30 ET. */
   nyOpenCaution: boolean;
+  /** Near the 24h low: tag (or keep only) the stronger fade setups. Absent = off. */
+  nearLow?: NearLowFilter;
+  /**
+   * Quiet: short bet alerts, and no "bet losing" warnings, review replies or
+   * stage-change messages (all still logged). Sandwich bets and answers to
+   * your replies are still sent.
+   */
+  quiet?: boolean;
 }
 
 /** What the fade watch needs from the imbalance watch to explain a call going against you. */
@@ -300,6 +399,8 @@ const SANDWICH_CHECK_MS = 60_000;
 const REVIEW_MAX_AGE_MS = 6 * 3_600_000;
 
 const pct = (x: number): string => `${x >= 0 ? "+" : ""}${(x * 100).toFixed(2)}%`;
+/** For messages: a real minus sign, and one decimal unless the move is small. */
+export const signedPct = (x: number): string => `${x >= 0 ? "+" : "−"}${Math.abs(x * 100).toFixed(Math.abs(x) < 0.001 ? 2 : 1)}%`;
 const hhmm = (t: number): string => new Date(t).toISOString().slice(11, 16);
 
 export class FadeWatcher {
@@ -354,6 +455,7 @@ export class FadeWatcher {
     this.persist();
     const text = stageChangeMessage(prev, r, this.cfg.confidence);
     console.log(`[fadewatch] stage ${prev} → ${r.stage} (last ${this.cfg.confidence.window}: ${r.wins} won)`);
+    if (this.cfg.quiet === true) return r;
     try {
       await this.dispatcher.dispatch({
         symbol: this.cfg.targets.join("/"), timeframeMin: Math.round((this.cfg.params.holdBars * this.barMs) / 60_000), direction: "UP",
@@ -408,7 +510,7 @@ export class FadeWatcher {
       console.log(`[fadewatch] ${call.symbol}: sandwich setup (${(against * 100).toFixed(2)}% against) — alert sent`);
       const text =
         sandwichMessage(rec, { pay: 1 / this.cfg.breakeven }) +
-        (this.cfg.nyOpenCaution && inNyOpenWindow(now) ? `\n⚠️ NY open (09:00–10:30 ET): moves here tend to keep going — a second bet doubles the risk.` : "");
+        (this.cfg.nyOpenCaution && inNyOpenWindow(now) ? `\n⚠️ NY open: moves at this hour tend to keep going — a second bet doubles the risk.` : "");
       try {
         if (this.inbox !== null && call.telegramMessageId !== undefined) await this.inbox.reply(call.telegramMessageId, text);
         else
@@ -481,7 +583,7 @@ export class FadeWatcher {
    */
   async reviewSettled(now: number, opts: { notify?: boolean; maxAgeMs?: number } = {}): Promise<number> {
     if (this.journal === null || this.reviews === null) return 0;
-    const notify = opts.notify ?? true;
+    const notify = opts.notify ?? this.cfg.quiet !== true;
     const maxAge = opts.maxAgeMs ?? REVIEW_MAX_AGE_MS;
     const done = new Set(this.reviews.readAll().map((r) => callKey(r)));
     // A minute and a half after the settle, so the last 1m candle has printed.
@@ -588,9 +690,13 @@ export class FadeWatcher {
    */
   async tick(now: number): Promise<boolean> {
     const limit = this.cfg.params.windowBars + 4;
-    const [lead, ...targets] = await Promise.all(
-      [this.cfg.lead, ...this.cfg.targets].map((s) => this.fetch(s, this.cfg.interval, limit))
-    );
+    const nearLow = this.cfg.nearLow !== undefined && this.cfg.nearLow.mode !== "off" ? this.cfg.nearLow : null;
+    // The near-low check needs a full 24h of the target's bars.
+    const targetLimit = nearLow === null ? limit : Math.max(limit, nearLow.band.lookbackBars + 4);
+    const [lead, ...targets] = await Promise.all([
+      this.fetch(this.cfg.lead, this.cfg.interval, limit),
+      ...this.cfg.targets.map((s) => this.fetch(s, this.cfg.interval, targetLimit)),
+    ]);
     const expectedClose = Math.floor(now / this.barMs) * this.barMs - 1;
     const fresh = (cs: readonly Candle[]): boolean => cs.some((c) => c.closeTime === expectedClose);
     if (!fresh(lead!) || !targets.every(fresh)) return false;
@@ -628,25 +734,64 @@ export class FadeWatcher {
         console.log(`[fadewatch] ${symbol}: setup found ${lateSec}s after the close — too late to be the tested trade, skipped`);
         continue;
       }
+      // Set before the near-low check: the backtest counts one position at a
+      // time across ALL fade calls, then splits them by band.
       this.state.openUntil[symbol] = sig.barClose + holdMs;
+      const band = nearLow === null ? undefined : bandReading(candles, sig.barClose, nearLow.band);
+      const atLow = band === undefined ? null : isNearLowCall({ bet: sig.bet, band });
+      if (nearLow !== null) {
+        const where = band === null || band === undefined ? "24h band unknown" : `${(band.pos * 100).toFixed(0)}% up the 24h range${band.lowRetested ? ", low retested" : ""}`;
+        console.log(`[fadewatch] ${symbol}: ${where} → ${atLow === true ? "near the low" : "not the near-low setup"}`);
+      }
       const alertPrice = candles[candles.length - 1]?.close ?? sig.signalClose;
       const holdMin = Math.round(holdMs / 60_000);
+      if (nearLow !== null && nearLow.mode === "only" && atLow !== true) {
+        // Not sent, but logged like a shadow call so --report can show what skipping cost.
+        this.shadowJournal?.append({
+          ts: now, symbol, lead: this.cfg.lead, bet: sig.bet, barClose: sig.barClose, lateSec, signalClose: sig.signalClose,
+          alertPrice, settleAt: now + holdMs, holdMin, leadPct: sig.leadPct, ownPct: sig.ownPct, rule: SKIPPED_NOT_NEAR_LOW,
+          ...(band === undefined ? {} : { band }),
+        });
+        console.log(`[fadewatch] ${symbol}: setup not sent — only near-low calls are sent (logged)`);
+        continue;
+      }
       const winMin = Math.round((this.cfg.params.windowBars * this.barMs) / 60_000);
       const bt = this.cfg.backtest[symbol];
-      const moved = sig.bet === "UP" ? "dumped" : "pumped";
+      const tag = (x: string): string => x.replace(/USDT$/, "");
+      const recentLine = this.journal === null ? null : recentCallsLine(this.journal.readAll(), symbol, sig.bet, alertPrice, now);
+      const what = sig.bet === "UP" ? "drops" : "pumps";
+      const did = sig.bet === "UP" ? "bounced" : "pulled back";
+      const nyOpen = this.cfg.nyOpenCaution && inNyOpenWindow(now);
+      const atTop = nearLow !== null && isTopOfRange(band);
+      // Quiet: two lines — what to do, and why it's worth it.
+      const brief = (): string => {
+        const rate = atLow === true && nearLow !== null ? nearLow.backtest.nearLow : bt;
+        return (
+          `Enter now · settles ~${hhmm(now + holdMs)} UTC (sent ${lateSec}s after the close).\n` +
+          `${tag(this.cfg.lead)} ${signedPct(sig.leadPct)} and ${tag(symbol)} ${signedPct(sig.ownPct)} in ${winMin} min` +
+          (atLow === true ? `, near the 24h low` : "") +
+          (rate === undefined ? "." : ` — won ${(rate * 100).toFixed(0)}% in testing.`) +
+          (atTop ? `\n${TOP_OF_RANGE_CAUTION}` : "") +
+          (nyOpen ? `\n⚠️ NY open hour: weaker in testing — bet smaller.` : "")
+        );
+      };
       const alert: Alert = {
         symbol,
         timeframeMin: holdMin,
         direction: sig.bet,
         confidence: bt ?? 0,
         entryPrice: alertPrice,
-        reason:
-          `${this.cfg.lead} ${pct(sig.leadPct)} and ${symbol} ${pct(sig.ownPct)} over the last ${winMin}m — both ${moved}, fade it.\n` +
-          `Bet ${sig.bet} for ${holdMin}m · settles ~${hhmm(now + holdMs)} UTC · 5m close was ${sig.signalClose}\n` +
-          `Alert is ${lateSec}s after the bar close. Enter now or skip: 5m late is roughly breakeven.\n` +
-          (bt === undefined ? "" : `Backtest ${(bt * 100).toFixed(1)}% over 540d vs ${(this.cfg.breakeven * 100).toFixed(1)}% breakeven.\n`) +
+        reason: this.cfg.quiet === true ? brief() :
+          `Settles ~${hhmm(now + holdMs)} UTC · sent ${lateSec}s after the 5m close — enter now or skip (5 min late has no edge).\n` +
+          `Why: ${tag(this.cfg.lead)} ${signedPct(sig.leadPct)} and ${tag(symbol)} ${signedPct(sig.ownPct)} in ${winMin} min. ` +
+          (bt === undefined
+            ? `Joint ${what} like this tend to reverse.\n`
+            : `Joint ${what} like this ${did} ${(bt * 100).toFixed(0)}% of the time in testing (${(this.cfg.breakeven * 100).toFixed(1)}% needed to profit).\n`) +
+          (nearLow !== null && atLow === true ? `${nearLowLine(nearLow)}\n` : "") +
+          (atTop ? `${TOP_OF_RANGE_CAUTION}\n` : "") +
+          (recentLine === null ? "" : `${recentLine}\n`) +
           stageLine(reading, this.cfg.confidence) +
-          (this.cfg.nyOpenCaution && inNyOpenWindow(now) ? `\n${NY_OPEN_CAUTION}` : ""),
+          (nyOpen ? `\n${NY_OPEN_CAUTION}` : ""),
         strategy: "fade-watch",
         live: false,
         ts: now,
@@ -670,6 +815,7 @@ export class FadeWatcher {
         ownPct: sig.ownPct,
         ...(telegramMessageId === undefined ? {} : { telegramMessageId }),
         ...(confirm === null ? {} : { confirm: { symbol: confirm.symbol, pct: confirmPct } }),
+        ...(band === undefined ? {} : { band }),
       });
     }
     // Open calls going against you: one warning each, no daily cap.
@@ -705,7 +851,7 @@ export class FadeWatcher {
    * where it ends — the level the move most likely stalls at, if it does.
    */
   async warnAgainst(now: number, latest: Record<string, number>): Promise<number> {
-    if (this.journal === null || !(this.cfg.againstPct > 0)) return 0;
+    if (this.journal === null || !(this.cfg.againstPct > 0) || this.cfg.quiet === true) return 0;
     const warned = (this.state.warned ??= {});
     // Forget warnings for calls settled more than a day ago.
     for (const [k, t] of Object.entries(warned)) if (now - t > 86_400_000) delete warned[k];
@@ -721,20 +867,20 @@ export class FadeWatcher {
       const ctx = this.imbalance === null ? null : await this.imbalance.context(call.symbol, now);
       const gap = ctx === null ? null : gapAgainst(ctx.states, price, heading, ctx.atr4h);
       const minsLeft = Math.max(0, Math.round((call.settleAt - now) / 60_000));
+      const sym = call.symbol.replace(/USDT$/, "");
       const lines = [
-        `⚠️ ${call.symbol} ${call.bet} call going against you: ${pct(call.bet === "UP" ? -against : against)} since the alert ` +
+        `⚠️ ${sym} ${call.bet} bet losing: ${signedPct(call.bet === "UP" ? -against : against)} ` +
           `(${fmtPrice(call.alertPrice)} → ${fmtPrice(price)}), ${minsLeft} min left.`,
       ];
       if (gap !== null) {
         const toEnd = (gap.far - price) / price;
         lines.push(
-          `Heading ${heading} into the ${describeGap(gap)}. End of the imbalance: ${fmtPrice(gap.far)} (${pct(toEnd)} from here) — ` +
-            `where the move most likely stalls, if it does.`
+          `Next likely pause: the ${describeGap(gap)}. Fast moves often stall by its far end, ` +
+            `${fmtPrice(gap.far)} (${Math.abs(toEnd * 100).toFixed(1)}% ${heading === "down" ? "below" : "above"}).`
         );
       } else if (ctx !== null) {
-        lines.push(`No unfilled 4h or daily imbalance within reach ${heading === "down" ? "below" : "above"} — no nearby level to expect it to stall at.`);
+        lines.push(`No unfilled price gap within reach ${heading === "down" ? "below" : "above"} — no obvious place for it to pause.`);
       }
-      lines.push("Dry-run call: nothing was traded.");
       const text = lines.join("\n");
       console.log(`[fadewatch] ${call.symbol}: call @${hhmm(call.ts)} UTC is ${(against * 100).toFixed(2)}% against — warning sent`);
       try {
@@ -788,6 +934,7 @@ export class FadeWatcher {
         ` · replies=${this.inbox === null ? "off" : "on"}` +
         ` · shadow=[${this.cfg.shadowRules.map((r) => r.id).join(",")}]` +
         ` · confirm=${this.cfg.confirm?.symbol ?? "off"}` +
+        ` · nearLow=${this.cfg.nearLow?.mode ?? "off"} · quiet=${this.cfg.quiet === true ? "on" : "off"}` +
         ` · stage=${this.state.stage ?? "skeptical"} · sandwich=${this.cfg.sandwich.enabled ? `${(this.cfg.sandwich.dipPct * 100).toFixed(2)}%/${this.cfg.sandwich.withinMin}m` : "off"}`
     );
   }
@@ -902,6 +1049,12 @@ export function fadeWatchConfigFromEnv(opts: { lead: string; breakeven: number }
     sandwichesPath: raw("FADE_SANDWICHES_PATH") ?? "./data/fade-sandwiches.jsonl",
     // FADE_NY_CAUTION=off removes the NY open caution line.
     nyOpenCaution: (raw("FADE_NY_CAUTION") ?? "on").toLowerCase() !== "off",
+    // FADE_NEAR_LOW=only (default) sends near-low calls only, =tag sends every
+    // call and marks the near-low ones, =off skips the check.
+    nearLow: { ...NEAR_LOW_FILTER, mode: nearLowMode(raw("FADE_NEAR_LOW")) },
+    // FADE_QUIET=off restores long alerts, "bet losing" warnings, review
+    // replies and stage-change messages.
+    quiet: (raw("FADE_QUIET") ?? "on").toLowerCase() !== "off",
     // Peeper 1.02. FADE_CONFIRM=off disables it.
     confirm:
       (raw("FADE_CONFIRM") ?? "on").toLowerCase() === "off"
@@ -912,6 +1065,13 @@ export function fadeWatchConfigFromEnv(opts: { lead: string; breakeven: number }
             joinPct: num("FADE_CONFIRM_PCT", MSTR_CONFIRM.joinPct * 100) / 100,
           },
   };
+}
+
+function nearLowMode(v: string | undefined): NearLowFilter["mode"] {
+  const m = (v ?? NEAR_LOW_FILTER.mode).toLowerCase();
+  if (m === "off" || m === "only" || m === "tag") return m;
+  console.warn(`[fadewatch] FADE_NEAR_LOW=${v} not understood (use only, tag or off) — using ${NEAR_LOW_FILTER.mode}`);
+  return NEAR_LOW_FILTER.mode;
 }
 
 function sleep(ms: number, keepGoing: () => boolean): Promise<void> {

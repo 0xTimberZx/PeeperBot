@@ -75,25 +75,26 @@ const pc1 = (x: number): string => `${(x * 100).toFixed(1)}%`;
 
 /** One line for every alert: where the bot stands and why. */
 export function stageLine(r: StageReading, p: ConfidenceParams): string {
-  if (r.stage === "confident") return `Mode: CONFIDENT — last ${p.window} calls won ${pc(r.rate ?? 0)} · sandwich alerts on.`;
-  if (r.settled < p.minSettled) return `Mode: SKEPTICAL — single bet only (${r.settled} of ${p.minSettled} calls settled before it can earn confidence).`;
-  return `Mode: SKEPTICAL — single bet only (last ${p.window} won ${pc(r.rate ?? 0)}; needs ${pc(p.upAt)}).`;
+  if (r.stage === "confident") return `Mode: confident — last ${p.window} won ${pc(r.rate ?? 0)}, so second-bet alerts are on.`;
+  if (r.settled < p.minSettled) return `Mode: skeptical — single bets only until ${p.minSettled} results are in (${r.settled} so far).`;
+  return `Mode: skeptical — single bets only (last ${p.window} won ${pc(r.rate ?? 0)}; needs ${pc(p.upAt)}).`;
 }
 
 /** The message sent when the stage changes. */
 export function stageChangeMessage(from: Stage, r: StageReading, p: ConfidenceParams): string {
-  const rec = `last ${p.window} settled calls: ${r.wins} won (${pc(r.rate ?? 0)})`;
+  const rec = `Last ${p.window} results: ${r.wins} won (${pc(r.rate ?? 0)})`;
   if (from === "skeptical" && r.stage === "confident") {
-    return (
-      `📈 Fade watch is now CONFIDENT — ${rec}, at or above ${pc(p.upAt)}.\n` +
-      `From now on, if a call dips against you early, you'll get a sandwich alert: a second bet the same way that settles with the first, ` +
-      `turning a partial recovery into a split (−0.1) instead of a full loss. It goes back to single bets if the last ${p.window} fall below ${pc1(p.downBelow)}.`
-    );
+    return [
+      `📈 Bot is now in confident mode`,
+      `${rec}, above the ${pc(p.upAt)} bar.`,
+      `If a bet dips early you'll now also get an optional second-bet alert. Back to single bets if the last ${p.window} drop below ${pc1(p.downBelow)}.`,
+    ].join("\n");
   }
-  return (
-    `📉 Fade watch is back to SKEPTICAL — ${rec}, below the ${pc1(p.downBelow)} breakeven.\n` +
-    `Single bets only; no sandwich alerts until the last ${p.window} win ${pc(p.upAt)} again. If it keeps sliding, the edge may be gone — check --report.`
-  );
+  return [
+    `📉 Bot is back in skeptical mode`,
+    `${rec}, below the ${pc1(p.downBelow)} needed to profit.`,
+    `Single bets only until the last ${p.window} reach ${pc(p.upAt)}. If it keeps sliding, the signal may have stopped working.`,
+  ].join("\n");
 }
 
 /** One dip-sandwich setup: logged always, sent only when confident. */
@@ -160,15 +161,14 @@ export function sandwichUnits(o: SandwichOutcome, pay: number): number {
 export function sandwichMessage(s: SandwichRecord, opts: { pay: number }): string {
   const hhmm = new Date(s.settleAt).toISOString().slice(11, 16);
   const fp = (x: number): string => x.toLocaleString("en-US", { maximumFractionDigits: x >= 100 ? 2 : 4 });
-  const move = (s.strike / s.firstEntry - 1) * 100;
-  const [beyond, past] = s.bet === "UP" ? ["above", "Below"] : ["below", "Above"];
+  const sym = s.symbol.replace(/USDT$/, "");
+  const move = Math.abs(s.strike / s.firstEntry - 1) * 100;
+  const [dir, beyond, past] = s.bet === "UP" ? ["Down", "Above", "below"] : ["Up", "Below", "above"];
   return [
-    `🥪 Sandwich · ${s.symbol} is ${move >= 0 ? "+" : ""}${move.toFixed(2)}% from your entry (${fp(s.firstEntry)} → ${fp(s.strike)}).`,
-    `Add a second ${s.bet} bet now and set it to settle at ${hhmm} UTC — ${s.minutesLeft} min, together with your first bet.`,
-    `Settles ${beyond} ${fp(s.firstEntry)}: both win (+${(2 * (opts.pay - 1)).toFixed(1)}). ` +
-      `Between ${fp(s.strike)} and ${fp(s.firstEntry)}: a split (${(opts.pay - 2).toFixed(1)}) instead of a full loss. ` +
-      `${past} ${fp(s.strike)}: both lose (−2).`,
-    `Backtest: the second bet won 57–62%; both lost about 40% of the times it fired. Skip it if ${s.symbol} is still moving hard against you.`,
+    `🥪 Optional second ${s.bet} bet · ${sym}`,
+    `${dir} ${move.toFixed(2)}% since your bet (${fp(s.firstEntry)} → ${fp(s.strike)}). Add ${s.bet} now, set to settle ${hhmm} UTC (${s.minutesLeft} min) with the first.`,
+    `${beyond} ${fp(s.firstEntry)}: both win (+${(2 * (opts.pay - 1)).toFixed(1)}) · in between: −${Math.abs(opts.pay - 2).toFixed(1)} · ${past} ${fp(s.strike)}: both lose (−2).`,
+    `Tested: the second bet won 57–62%. Skip it if ${sym} is still moving hard against you.`,
   ].join("\n");
 }
 

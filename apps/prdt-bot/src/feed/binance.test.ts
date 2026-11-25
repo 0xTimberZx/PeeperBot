@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
-import { fetchKlines } from "./binance.js";
+import { fetchKlines, fetchHistory, RATE_LIMIT_BACKOFF_MS } from "./binance.js";
 
 // Fake fetch that routes by URL host and returns each exchange's native shape.
 function stubFetch(handler: (url: string) => { ok: boolean; status?: number; body?: unknown }) {
@@ -132,5 +132,73 @@ describe("feed sources", () => {
     await expect(fetchKlines({ symbol: "BTCUSDT", interval: "1m", limit: 1 })).rejects.toThrow(
       /all feed sources failed/
     );
+  });
+});
+
+describe("KuCoin, Gate.io, 429 retry and per-call chains", () => {
+  const H4 = 14_400_000;
+  const T = 1_800_000_000_000 - (1_800_000_000_000 % H4); // a 4h boundary
+
+  it("parses KuCoin candles (seconds, open/close/high/low order, newest-first)", async () => {
+    let seen = "";
+    stubFetch((url) => {
+      seen = url;
+      return {
+        ok: true,
+        body: {
+          code: "200000",
+          data: [
+            [String((T - H4) / 1000), "11", "12", "13", "10", "5", "0"],
+            [String((T - 2 * H4) / 1000), "10", "11", "12", "9", "4", "0"],
+          ],
+        },
+      };
+    });
+    const c = await fetchHistory({ symbol: "BTCUSDT", interval: "4h", count: 2, endTime: T - 1, sources: ["kucoin"] });
+    expect(seen).toContain("api.kucoin.com");
+    expect(seen).toContain("symbol=BTC-USDT");
+    expect(seen).toContain("type=4hour");
+    expect(c.map((x) => x.openTime)).toEqual([T - 2 * H4, T - H4]);
+    expect(c[1]).toMatchObject({ open: 11, close: 12, high: 13, low: 10, closeTime: T - 1 });
+  });
+
+  it("parses Gate.io candles (seconds, oldest-first, open in column 5)", async () => {
+    stubFetch((url) => {
+      expect(url).toContain("currency_pair=ETH_USDT");
+      return { ok: true, body: [[String((T - H4) / 1000), "0", "21", "23", "19", "20", "7", "true"]] };
+    });
+    const c = await fetchHistory({ symbol: "ETHUSDT", interval: "4h", count: 1, endTime: T - 1, sources: ["gate"] });
+    expect(c).toEqual([{ openTime: T - H4, open: 20, high: 23, low: 19, close: 21, volume: 7, closeTime: T - 1 }]);
+  });
+
+  it("retries a rate-limited (429) request, then falls back down the chain", async () => {
+    const saved = [...RATE_LIMIT_BACKOFF_MS];
+    RATE_LIMIT_BACKOFF_MS.splice(0, RATE_LIMIT_BACKOFF_MS.length, 0, 0);
+    try {
+      let kucoinCalls = 0;
+      stubFetch((url) => {
+        if (url.includes("kucoin")) {
+          kucoinCalls++;
+          return kucoinCalls === 1
+            ? { ok: false, status: 429 }
+            : { ok: true, body: { code: "200000", data: [[String((T - H4) / 1000), "1", "2", "3", "0.5", "1", "0"]] } };
+        }
+        return { ok: false, status: 403 };
+      });
+      const c = await fetchHistory({ symbol: "BTCUSDT", interval: "4h", count: 1, endTime: T - 1, sources: ["kucoin"] });
+      expect(kucoinCalls).toBe(2);
+      expect(c[0]!.close).toBe(2);
+
+      // Always 429 on KuCoin: gives up after the retries and uses Gate.
+      stubFetch((url) =>
+        url.includes("kucoin")
+          ? { ok: false, status: 429 }
+          : { ok: true, body: [[String((T - H4) / 1000), "0", "5", "6", "4", "4.5", "1", "true"]] }
+      );
+      const g = await fetchHistory({ symbol: "BTCUSDT", interval: "4h", count: 1, endTime: T - 1, sources: ["kucoin", "gate"] });
+      expect(g[0]!.close).toBe(5);
+    } finally {
+      RATE_LIMIT_BACKOFF_MS.splice(0, RATE_LIMIT_BACKOFF_MS.length, ...saved);
+    }
   });
 });
