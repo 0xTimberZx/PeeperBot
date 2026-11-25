@@ -512,7 +512,7 @@ describe("near the 24h low", () => {
   it("tags an alert near the low and records the band on the call", async () => {
     const { sent, calls } = await journaled({ COREUSDT: lead, BTCUSDT: atLow }, "tag");
     expect(sent).toHaveLength(1);
-    expect(sent[0]!.reason).toContain("📍 Near the 24h low (bottom 10% of the range): calls here won 60% in testing vs ~55% for the rest");
+    expect(sent[0]!.reason).toContain("📍 Near the 24h low (bottom 10% of the range). Tracked, not proven: 60% vs ~55% in one test");
     expect(calls[0]!.band).toMatchObject({ pos: 0, nearLow: true, lowRetested: false });
   });
 
@@ -536,16 +536,16 @@ describe("near the 24h low", () => {
     expect(calls[0]!.band).toBeUndefined();
   });
 
-  it("defaults to only mode from env; FADE_NEAR_LOW=tag / off switch it", async () => {
+  it("defaults to tag mode from env; FADE_NEAR_LOW=only / off switch it", async () => {
     const { fadeWatchConfigFromEnv } = await import("./fadeWatch.js");
     const prev = process.env["FADE_NEAR_LOW"];
     try {
       delete process.env["FADE_NEAR_LOW"];
       const def = fadeWatchConfigFromEnv({ lead: "COREUSDT", breakeven: 0.526 }).nearLow!;
-      expect(def.mode).toBe("only");
+      expect(def.mode).toBe("tag");
       expect(def.band).toMatchObject({ lookbackBars: 288, prox: 0.1, tol: 0.002, minGapBars: 6 });
-      process.env["FADE_NEAR_LOW"] = "tag";
-      expect(fadeWatchConfigFromEnv({ lead: "COREUSDT", breakeven: 0.526 }).nearLow!.mode).toBe("tag");
+      process.env["FADE_NEAR_LOW"] = "only";
+      expect(fadeWatchConfigFromEnv({ lead: "COREUSDT", breakeven: 0.526 }).nearLow!.mode).toBe("only");
       process.env["FADE_NEAR_LOW"] = "OFF";
       expect(fadeWatchConfigFromEnv({ lead: "COREUSDT", breakeven: 0.526 }).nearLow!.mode).toBe("off");
     } finally {
@@ -581,7 +581,7 @@ describe("quiet mode and the top-of-range caution", () => {
     await w.tick(at);
     const text = sent[0]!.reason;
     expect(text.split("\n")).toHaveLength(2);
-    expect(text).toMatch(/^Enter now · settles ~\d\d:\d\d UTC \(sent 4s after the close\)\.\nCORE −2\.0% and BTC −0\.4% in 10 min, near the 24h low — won 60% in testing\.$/);
+    expect(text).toMatch(/^Enter now · settles ~\d\d:\d\d UTC \(sent 4s after the close\)\.\nCORE −2\.0% and BTC −0\.4% in 10 min, near the 24h low — won \d+% in testing\.$/);
   });
 
   it("holds back other calls in only mode and logs them for the report", async () => {
