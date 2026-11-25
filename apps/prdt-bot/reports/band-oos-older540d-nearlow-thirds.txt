@@ -1,0 +1,91 @@
+
+> peeperbot@0.0.0 bot:band
+> npm run band --workspace=apps/prdt-bot -- --days 540 --skip-days 540 --prox 0.1 --tol 0.2 --hold 30 --prox-sweep 0.1 --tol-sweep 0.2
+
+
+> @peeperbot/prdt-bot@0.0.0 band
+> tsx src/cli.ts band --days 540 --skip-days 540 --prox 0.1 --tol 0.2 --hold 30 --prox-sweep 0.1 --tol-sweep 0.2
+
+[band] fetching 155520 × 5m bars each for COREUSDT, BTCUSDT, ETHUSDT…
+
+═══════ 24h band · BTCUSDT ═══════
+band = lowest low → highest high of the last 24h · "near" = close in the outer 10% · "retested" = a bar ≥30m after the edge came within 0.20% of it
+period 2023-12-10 → 2025-06-02 · 155520 5m bars · breakeven 52.6%
+
+A. Fade calls (COREUSDT + BTCUSDT joint dump → UP 30m), split by the band
+  all fade calls                           n= 1546  win  56.2%  (95% floor  53.7%)  EDGE
+  near a RETESTED 24h low (the idea)       n=   82  win  58.5%  (95% floor  47.7%)  unproven
+  near the 24h low, not retested           n=  288  win  61.1%  (95% floor  55.4%)  EDGE
+  near a retested 24h HIGH (band says DOWN) n=   10  win  40.0%  (95% floor  16.8%)  no edge
+  everywhere else                          n= 1166  win  55.0%  (95% floor  52.1%)  unproven
+  by where the close sat in the band:
+      0–20% of the band                    n=  602  win  57.0%  (95% floor  53.0%)  EDGE
+      20–40% of the band                   n=  305  win  52.8%  (95% floor  47.2%)  unproven
+      40–60% of the band                   n=  271  win  60.5%  (95% floor  54.6%)  EDGE
+      60–80% of the band                   n=  244  win  56.1%  (95% floor  49.9%)  unproven
+      80–100% of the band                  n=  124  win  51.6%  (95% floor  42.9%)  no edge
+  the idea, in each third of the period:
+      oldest third (from 2023-12-10)       n=   19  win  63.2%  (95% floor  41.0%)  unproven
+      middle third (from 2024-06-07)       n=   34  win  50.0%  (95% floor  34.1%)  no edge
+      newest third (from 2024-12-04)       n=   29  win  65.5%  (95% floor  47.3%)  unproven
+  near the 24h low, not retested, in each third of the period:
+      oldest third (from 2023-12-10)       n=   75  win  69.3%  (95% floor  58.2%)  EDGE
+      middle third (from 2024-06-07)       n=   92  win  65.2%  (95% floor  55.1%)  EDGE
+      newest third (from 2024-12-04)       n=  121  win  52.9%  (95% floor  44.0%)  unproven
+
+B. The band rule on its own (every 5m close, hold 30m, one at a time)
+  all band trades                          n= 2652  win  53.1%  (95% floor  51.2%)  unproven
+  UP at a retested 24h low                 n= 1093  win  54.1%  (95% floor  51.1%)  unproven
+  DOWN at a retested 24h high              n= 1559  win  52.5%  (95% floor  50.0%)  no edge
+    oldest third (from 2023-12-10)         n=  772  win  57.1%  (95% floor  53.6%)  EDGE
+    middle third (from 2024-06-07)         n=  901  win  51.5%  (95% floor  48.2%)  no edge
+    newest third (from 2024-12-04)         n=  979  win  51.5%  (95% floor  48.4%)  no edge
+
+Control: BTCUSDT closes up over any 30m: 50.6%
+EDGE = even the 95% floor beats breakeven. Trust a slice only at n ≥ 50 and only if it holds in every third.
+═══════════════════════════════════
+
+BTCUSDT sensitivity (win rate, n, 95% floor) — breakeven 52.6%
+  near / tol       A: fade at retested low        B: band rule alone
+  10% / 0.2%           58.5% (n=82, 47.7%)     53.1% (n=2652, 51.2%)
+
+═══════ 24h band · ETHUSDT ═══════
+band = lowest low → highest high of the last 24h · "near" = close in the outer 10% · "retested" = a bar ≥30m after the edge came within 0.20% of it
+period 2023-12-10 → 2025-06-02 · 155520 5m bars · breakeven 52.6%
+
+A. Fade calls (COREUSDT + ETHUSDT joint dump → UP 30m), split by the band
+  all fade calls                           n= 1624  win  54.6%  (95% floor  52.1%)  unproven
+  near a RETESTED 24h low (the idea)       n=   46  win  58.7%  (95% floor  44.3%)  unproven
+  near the 24h low, not retested           n=  322  win  59.0%  (95% floor  53.6%)  EDGE
+  near a retested 24h HIGH (band says DOWN) n=    1  win 100.0%  (95% floor  20.7%)  unproven
+  everywhere else                          n= 1255  win  53.2%  (95% floor  50.5%)  unproven
+  by where the close sat in the band:
+      0–20% of the band                    n=  611  win  56.1%  (95% floor  52.2%)  unproven
+      20–40% of the band                   n=  349  win  53.9%  (95% floor  48.6%)  unproven
+      40–60% of the band                   n=  293  win  56.7%  (95% floor  50.9%)  unproven
+      60–80% of the band                   n=  259  win  54.8%  (95% floor  48.7%)  unproven
+      80–100% of the band                  n=  112  win  42.0%  (95% floor  33.2%)  no edge
+  the idea, in each third of the period:
+      oldest third (from 2023-12-10)       n=   16  win  68.8%  (95% floor  44.4%)  unproven
+      middle third (from 2024-06-07)       n=   16  win  62.5%  (95% floor  38.6%)  unproven
+      newest third (from 2024-12-04)       n=   14  win  42.9%  (95% floor  21.4%)  no edge
+  near the 24h low, not retested, in each third of the period:
+      oldest third (from 2023-12-10)       n=   92  win  63.0%  (95% floor  52.8%)  EDGE
+      middle third (from 2024-06-07)       n=  108  win  63.9%  (95% floor  54.5%)  EDGE
+      newest third (from 2024-12-04)       n=  122  win  51.6%  (95% floor  42.9%)  no edge
+
+B. The band rule on its own (every 5m close, hold 30m, one at a time)
+  all band trades                          n= 2071  win  54.2%  (95% floor  52.1%)  unproven
+  UP at a retested 24h low                 n=  755  win  55.2%  (95% floor  51.7%)  unproven
+  DOWN at a retested 24h high              n= 1316  win  53.6%  (95% floor  50.9%)  unproven
+    oldest third (from 2023-12-10)         n=  769  win  54.7%  (95% floor  51.2%)  unproven
+    middle third (from 2024-06-07)         n=  657  win  52.4%  (95% floor  48.5%)  no edge
+    newest third (from 2024-12-04)         n=  645  win  55.5%  (95% floor  51.6%)  unproven
+
+Control: ETHUSDT closes up over any 30m: 50.8%
+EDGE = even the 95% floor beats breakeven. Trust a slice only at n ≥ 50 and only if it holds in every third.
+═══════════════════════════════════
+
+ETHUSDT sensitivity (win rate, n, 95% floor) — breakeven 52.6%
+  near / tol       A: fade at retested low        B: band rule alone
+  10% / 0.2%           58.7% (n=46, 44.3%)     54.2% (n=2071, 52.1%)
