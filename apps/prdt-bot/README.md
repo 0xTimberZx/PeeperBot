@@ -583,18 +583,38 @@ npm run bot:fadewatch -- --report   # score every past alert against price
   did well (63.8%) and is not flagged. Sandwich alerts in the window get a
   shorter warning. `--report` shows the live record in and out of the window.
   `FADE_NY_CAUTION=off` removes it. US market holidays are not excluded.
-- **Near the 24h low**: an alert whose signal bar closed in the bottom 10% of
-  the coin's last-24h range (lowest low → highest high), where that low has
-  not been retested since it formed, gets a 📍 line marking it the stronger
-  setup. Backtest (two 540-day windows, Dec 2023 → Nov 2026, BTC+ETH): these
-  calls won 59.6% (n=1,250) vs about 55% for the other fade calls, above
-  breakeven in 11 of 12 period thirds — but only 5 of 12 cleared the 95%
-  floor, and Dec 2024 → Jun 2025 was flat (BTC 52.9%, ETH 51.6%). So it tags
-  rather than blocks: the other calls still win above breakeven. Each call
-  records its band reading, and `--report` splits the live record near-low vs
-  the rest (judge at 100+ settled near-low calls). Outputs:
-  `reports/band-*-nearlow-thirds.txt`. `FADE_NEAR_LOW=only` sends near-low
-  calls only; `FADE_NEAR_LOW=off` turns the check off.
+- **Quiet mode (default)**: only the higher-edge calls reach your phone, in
+  two lines — what to do, and why:
+  > 🔔 BTC — bet UP, 30 min @ 64,210
+  > Enter now · settles ~14:35 UTC (sent 4s after the close).
+  > CORE −2.1% and BTC −0.6% in 30 min, near the 24h low — won 60% in testing.
+
+  Not sent while quiet (still logged, and still scored by `--report`): fade
+  calls that aren't near the 24h low, "bet losing" warnings while a call is
+  open, the review after each call settles, confidence-stage changes, and
+  the daily imbalance callout. Still sent: sandwich bets (only while
+  confident) and answers to your won / lost / missed replies.
+  `FADE_QUIET=off` brings back the long alerts and every message above.
+- **Near the 24h low**: a fade call whose signal bar closed in the bottom 10%
+  of the coin's last-24h range (lowest low → highest high), where that low
+  has not been retested since it formed. Backtest (two 540-day windows,
+  Dec 2023 → Nov 2026, BTC+ETH): these calls won 59.6% (n=1,250) vs about
+  55% for the other fade calls, above breakeven in 11 of 12 period thirds —
+  only 5 of 12 cleared the 95% floor, and Dec 2024 → Jun 2025 was flat
+  (BTC 52.9%, ETH 51.6%). By default **only these are sent**; the other calls
+  are logged to `data/fade-shadow.jsonl` and `--report` scores both, so you
+  can see what skipping them costs (judge at 100+ settled near-low calls).
+  `FADE_NEAR_LOW=tag` sends every call and marks the near-low ones;
+  `FADE_NEAR_LOW=off` turns the check off. Outputs:
+  `reports/band-*-nearlow-thirds.txt`.
+- **Top of the 24h range caution**: when every call is sent
+  (`FADE_NEAR_LOW=tag`), a call whose signal bar closed in the top fifth of
+  the 24h range ends with "⚠️ Top of the 24h range: the weakest spot in
+  testing (49% won) — skip or bet smaller." Backtest (same windows, BTC+ETH):
+  48.6% won (n=356), below breakeven — but mixed by period third (7 of 12
+  below breakeven, 5 above, on 10–50 calls each), so it is a caution, not a
+  skip. About 6% of fade calls land there. Outputs:
+  `reports/band-*-top-thirds.txt`.
 - **MSTR confirm — Peeper 1.02**: every alert also records how MSTR moved
   over the same 30m window (OKX's MSTR perpetual; the feed falls back to the
   perpetual for symbols with no spot market). `--report` splits the live
