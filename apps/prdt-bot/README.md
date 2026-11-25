@@ -591,9 +591,10 @@ npm run bot:fadewatch -- --report   # score every past alert against price
 
   Not sent while quiet (still logged, and still scored by `--report`): fade
   calls that aren't near the 24h low, "bet losing" warnings while a call is
-  open, the review after each call settles, confidence-stage changes, and
-  the daily imbalance callout. Still sent: sandwich bets (only while
-  confident) and answers to your won / lost / missed replies.
+  open, the review after each call settles, and confidence-stage changes.
+  Still sent: sandwich bets (only while confident), answers to your won /
+  lost / missed replies, and the daily imbalance callout (at most one per
+  24h; `IMBALANCE_OFF=1` stops it).
   `FADE_QUIET=off` brings back the long alerts and every message above.
 - **Near the 24h low**: a fade call whose signal bar closed in the bottom 10%
   of the coin's last-24h range (lowest low → highest high), where that low

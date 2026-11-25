@@ -985,8 +985,9 @@ async function cmdFadeWatch(flags: Map<string, string>): Promise<void> {
   process.on("SIGINT", stopAll);
   process.on("SIGTERM", stopAll);
   const forMin = flags.get("for") === undefined ? undefined : Number(flags.get("for"));
-  // Quiet: the imbalance gap map is kept, but its daily callout isn't sent.
-  await Promise.all([watcher.start(forMin), watchCfg.quiet === true ? undefined : imbalance?.start(forMin)]);
+  // The daily imbalance callout runs in quiet mode too (still capped at one per
+  // 24h); IMBALANCE_OFF=1 is the way to silence it.
+  await Promise.all([watcher.start(forMin), imbalance?.start(forMin)]);
 }
 
 /** Imbalance callouts on their own: --status prints the live gap map, --once scans (24h cap applies). */

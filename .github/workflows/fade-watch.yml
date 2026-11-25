@@ -42,8 +42,9 @@ name: Fade watch
 #
 # Quiet (default): only fade calls near the 24h low are sent, in two lines;
 # the others are logged to data/fade-shadow.jsonl and scored by --report.
-# "Bet losing" warnings, review replies, stage-change messages and the daily
-# imbalance callout are logged but not sent. Variables: FADE_QUIET=off brings
+# "Bet losing" warnings, review replies and stage-change messages are logged
+# but not sent. The daily imbalance callout still is (IMBALANCE_OFF=1 stops
+# it). Variables: FADE_QUIET=off brings
 # them all back; FADE_NEAR_LOW=tag sends every call (near-low ones marked,
 # top-of-range ones cautioned), =off drops the band check.
 #
