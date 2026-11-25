@@ -1,11 +1,11 @@
 name: Position watch
 
-# Always-on watch on a position YOU hold (it never trades). Every ~15 minutes it
-# checks whether price is heading back into your entry / limit-ladder / stop zone
-# and pings Telegram — tagged reversion (momentum fading) vs real trend
-# (accelerating). Runs with no Codespace open.
+# On-demand check of a perp/spot position YOU hold (it never trades): is price
+# heading back into your entry / limit-ladder / stop zone? Pings Telegram,
+# tagged reversion (momentum fading) vs real trend (accelerating). Run it from
+# Actions → Position watch → Run workflow.
 #
-# State: it alerts once per level per episode (a per-level latch). A fresh cron
+# State: it alerts once per level per episode (a per-level latch). A fresh
 # process has no memory, so data/poswatch-state.json is persisted between runs
 # via the actions/cache.
 #
@@ -16,17 +16,14 @@ name: Position watch
 #   POS_LIMITS      comma list behind entry, e.g. 65780,66500,68000
 #   POS_STOP        e.g. 69100
 #   POS_PROXIMITY   optional band, default 0.005 (0.5%)
-#   POS_LOSS_FROM   optional date (default 2026-11-20): adds a line with the
-#                   average settle price of the bot's losing calls since then;
-#                   "off" removes it. Your profit is still measured from your
-#                   avg entry (POS_BREAKEVEN), not from this.
 # (Telegram reuses the same TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID secrets.)
 # Update the Variables whenever your position changes; delete the cache entry to
 # reset the latch.
 
+# No schedule: PeeperBot's calls are PRDT binary bets, which have no stop,
+# add-on levels or trailing profit to watch. Run it by hand from the Actions
+# tab if you ever hold a perp or spot position.
 on:
-  schedule:
-    - cron: "*/15 * * * *" # every 15 min — a heads-up cadence for a swing position
   workflow_dispatch:
     inputs:
       symbol: { description: "Symbol", required: false }
@@ -48,17 +45,6 @@ jobs:
         with:
           node-version: 20
           cache: npm
-      # Read-only: the fade watch's saved results, so position messages can say
-      # where the bot's losing calls settled (POS_LOSS_FROM). Never saved back.
-      # Same path and key prefix as fade-watch.yml. Runs before the latch
-      # restore so it can't overwrite poswatch-state.json.
-      - name: Restore fade-watch results (read-only)
-        uses: actions/cache/restore@v4
-        with:
-          path: apps/prdt-bot/data
-          key: fade-data-none
-          restore-keys: |
-            fade-data-
       - name: Restore latch
         uses: actions/cache/restore@v4
         with:
@@ -85,10 +71,6 @@ jobs:
           POS_BREAKEVEN: ${{ vars.POS_BREAKEVEN }}
           POS_PROFIT_TARGET: ${{ vars.POS_PROFIT_TARGET }}
           POS_GIVEBACK: ${{ vars.POS_GIVEBACK }}
-          # Reference line: average settle price of the bot's losing calls on
-          # this coin since this date. Set the POS_LOSS_FROM variable to change
-          # it, or to "off" to remove the line.
-          POS_LOSS_FROM: ${{ vars.POS_LOSS_FROM || '2026-11-20' }}
         run: npm run poswatch --workspace=apps/prdt-bot -- --once
       - name: Save latch
         if: always()

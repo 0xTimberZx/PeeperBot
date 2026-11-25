@@ -234,6 +234,30 @@ export function nearLowLine(f: NearLowFilter): string {
   );
 }
 
+/** What `losingCallsLine` needs from a post-settle review. */
+export interface SettledCall {
+  symbol: string;
+  bet: Dir;
+  alertTs: number;
+  finalPct: number; // in the bet's favour; ≤ 0 = lost (a flat settle loses)
+  settlePrice: number;
+}
+
+/**
+ * Where this coin's losing calls in the same direction settled since
+ * `fromTs`: their average settle price, and where the price is now. On an UP
+ * signal that is roughly where failed bounces ended. Null when there are none.
+ */
+export function losingCallsLine(calls: readonly SettledCall[], symbol: string, bet: Dir, fromTs: number, price: number): string | null {
+  const lost = calls.filter((c) => c.symbol === symbol && c.bet === bet && c.alertTs >= fromTs && c.finalPct <= 0 && c.settlePrice > 0);
+  if (lost.length === 0) return null;
+  const avg = lost.reduce((a, c) => a + c.settlePrice, 0) / lost.length;
+  const since = new Date(fromTs).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+  const vs = price / avg - 1;
+  const where = Math.abs(vs) < 0.0005 ? "about the same" : `${Math.abs(vs * 100).toFixed(1)}% ${vs > 0 ? "higher" : "lower"}`;
+  return `Losing ${bet} calls since ${since} settled at ${fmtPrice(avg)} on average (${lost.length} call${lost.length === 1 ? "" : "s"}) · now ${where}.`;
+}
+
 /** Did the confirm symbol join the move (same direction as the target, by at least `joinPct`)? */
 export function confirmJoined(call: Pick<FadeCall, "bet" | "confirm">, joinPct: number): boolean | null {
   const pct = call.confirm?.pct;
@@ -371,6 +395,8 @@ export interface FadeWatchConfig {
    * your replies are still sent.
    */
   quiet?: boolean;
+  /** Show where losing calls settled since this time (ms). Null/absent = off. */
+  lossFrom?: number | null;
 }
 
 /** What the fade watch needs from the imbalance watch to explain a call going against you. */
@@ -762,7 +788,15 @@ export class FadeWatcher {
       const winMin = Math.round((this.cfg.params.windowBars * this.barMs) / 60_000);
       const bt = this.cfg.backtest[symbol];
       const tag = (x: string): string => x.replace(/USDT$/, "");
-      const recentLine = this.journal === null ? null : recentCallsLine(this.journal.readAll(), symbol, sig.bet, alertPrice, now);
+      const journalAll = this.journal === null ? [] : this.journal.readAll();
+      const recentLine = this.journal === null ? null : recentCallsLine(journalAll, symbol, sig.bet, alertPrice, now);
+      // Only calls that were actually sent: skipped (logged-only) setups are reviewed too.
+      const sentKeys = new Set(journalAll.filter((c) => c.rule === undefined).map((c) => callKey(c)));
+      const lossFrom = this.cfg.lossFrom ?? null;
+      const lossLine =
+        this.reviews === null || lossFrom === null
+          ? null
+          : losingCallsLine(this.reviews.readAll().filter((r) => sentKeys.has(callKey(r))), symbol, sig.bet, lossFrom, alertPrice);
       const what = sig.bet === "UP" ? "drops" : "pumps";
       const did = sig.bet === "UP" ? "bounced" : "pulled back";
       const nyOpen = this.cfg.nyOpenCaution && inNyOpenWindow(now);
@@ -777,6 +811,7 @@ export class FadeWatcher {
           (atLow === true ? `, near the 24h low` : "") +
           (rate === undefined ? "." : ` — won ${(rate * 100).toFixed(0)}% in testing.`) +
           (atTop ? `\n${TOP_OF_RANGE_CAUTION}` : "") +
+          (lossLine === null ? "" : `\n${lossLine}`) +
           (nyOpen ? `\n⚠️ NY open hour: weaker in testing — bet smaller.` : "")
         );
       };
@@ -795,6 +830,7 @@ export class FadeWatcher {
           (nearLow !== null && atLow === true ? `${nearLowLine(nearLow)}\n` : "") +
           (atTop ? `${TOP_OF_RANGE_CAUTION}\n` : "") +
           (recentLine === null ? "" : `${recentLine}\n`) +
+          (lossLine === null ? "" : `${lossLine}\n`) +
           stageLine(reading, this.cfg.confidence) +
           (nyOpen ? `\n${NY_OPEN_CAUTION}` : ""),
         strategy: "fade-watch",
@@ -1060,6 +1096,12 @@ export function fadeWatchConfigFromEnv(opts: { lead: string; breakeven: number }
     // FADE_QUIET=off restores long alerts, "bet losing" warnings, review
     // replies and stage-change messages.
     quiet: (raw("FADE_QUIET") ?? "on").toLowerCase() !== "off",
+    // FADE_LOSS_FROM=2026-11-20: add where losing calls settled since then. Unset/"off" = no line.
+    lossFrom: (() => {
+      const v = raw("FADE_LOSS_FROM");
+      const t = v === undefined ? NaN : Date.parse(`${v}T00:00:00Z`);
+      return Number.isFinite(t) ? t : null;
+    })(),
     // Peeper 1.02. FADE_CONFIRM=off disables it.
     confirm:
       (raw("FADE_CONFIRM") ?? "on").toLowerCase() === "off"

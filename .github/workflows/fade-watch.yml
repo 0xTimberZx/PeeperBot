@@ -183,6 +183,8 @@ jobs:
           FADE_CONFIRM_PCT: ${{ vars.FADE_CONFIRM_PCT }}
           FADE_NY_CAUTION: ${{ vars.FADE_NY_CAUTION }}
           FADE_QUIET: ${{ vars.FADE_QUIET }}
+          # Adds where losing calls settled since this date to each signal; "off" removes it.
+          FADE_LOSS_FROM: ${{ vars.FADE_LOSS_FROM || '2026-11-20' }}
           FADE_NEAR_LOW: ${{ vars.FADE_NEAR_LOW }}
         run: |
           if [ "${{ github.event.inputs.test }}" = "true" ]; then
