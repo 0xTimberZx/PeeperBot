@@ -800,7 +800,11 @@ async function cmdFadeWatch(flags: Map<string, string>): Promise<void> {
       direction: "UP",
       confidence: 0.56,
       entryPrice: 0,
-      reason: "TEST — a sample bet signal to check delivery. Nothing is live; don't bet on this.",
+      // Mirrors a quiet-mode near-low alert, so the test shows what a real call looks like.
+      reason:
+        "🧪 TEST — nothing is live, don't bet on this.\n" +
+        "Enter now · settles ~14:35 UTC (sent 4s after the close).\n" +
+        "CORE −2.1% and BTC −0.6% in 30 min, near the 24h low — won 60% in testing.",
       strategy: "fade-watch",
       live: false,
       ts: Date.now(),
