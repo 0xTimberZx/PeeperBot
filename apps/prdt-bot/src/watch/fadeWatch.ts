@@ -177,7 +177,11 @@ export interface NearLowFilter {
 }
 
 export const NEAR_LOW_FILTER: NearLowFilter = {
-  mode: "only",
+  // "tag", not "only": the near-low slice is unproven (it flips sign between a
+  // 30m and a 15m hold and failed its out-of-sample test), while the plain fade
+  // setup holds at 30m. So every fade call is sent; near-low ones are marked and
+  // scored separately until the live record can judge them.
+  mode: "tag",
   band: { ...DEFAULT_BAND_PARAMS, prox: 0.1, tol: 0.002 },
   backtest: { nearLow: 0.596, other: 0.55 },
 };
@@ -225,8 +229,8 @@ export const TOP_OF_RANGE_CAUTION = `⚠️ Top of the 24h range: the weakest sp
 
 export function nearLowLine(f: NearLowFilter): string {
   return (
-    `📍 Near the 24h low (bottom ${(f.band.prox * 100).toFixed(0)}% of the range): calls here won ${(f.backtest.nearLow * 100).toFixed(0)}% in testing ` +
-    `vs ~${(f.backtest.other * 100).toFixed(0)}% for the rest — the stronger setup, though not in every period.`
+    `📍 Near the 24h low (bottom ${(f.band.prox * 100).toFixed(0)}% of the range). Tracked, not proven: ` +
+    `${(f.backtest.nearLow * 100).toFixed(0)}% vs ~${(f.backtest.other * 100).toFixed(0)}% in one test, but it didn't hold on a 15-min hold or in every period.`
   );
 }
 
@@ -765,7 +769,8 @@ export class FadeWatcher {
       const atTop = nearLow !== null && isTopOfRange(band);
       // Quiet: two lines — what to do, and why it's worth it.
       const brief = (): string => {
-        const rate = atLow === true && nearLow !== null ? nearLow.backtest.nearLow : bt;
+        // Quote the plain setup's tested rate: the near-low figure is unproven.
+        const rate = bt;
         return (
           `Enter now · settles ~${hhmm(now + holdMs)} UTC (sent ${lateSec}s after the close).\n` +
           `${tag(this.cfg.lead)} ${signedPct(sig.leadPct)} and ${tag(symbol)} ${signedPct(sig.ownPct)} in ${winMin} min` +
@@ -1049,8 +1054,8 @@ export function fadeWatchConfigFromEnv(opts: { lead: string; breakeven: number }
     sandwichesPath: raw("FADE_SANDWICHES_PATH") ?? "./data/fade-sandwiches.jsonl",
     // FADE_NY_CAUTION=off removes the NY open caution line.
     nyOpenCaution: (raw("FADE_NY_CAUTION") ?? "on").toLowerCase() !== "off",
-    // FADE_NEAR_LOW=only (default) sends near-low calls only, =tag sends every
-    // call and marks the near-low ones, =off skips the check.
+    // FADE_NEAR_LOW=tag (default) sends every call and marks the near-low ones,
+    // =only sends near-low calls only, =off skips the check.
     nearLow: { ...NEAR_LOW_FILTER, mode: nearLowMode(raw("FADE_NEAR_LOW")) },
     // FADE_QUIET=off restores long alerts, "bet losing" warnings, review
     // replies and stage-change messages.

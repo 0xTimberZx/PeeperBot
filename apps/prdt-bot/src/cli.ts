@@ -804,7 +804,7 @@ async function cmdFadeWatch(flags: Map<string, string>): Promise<void> {
       reason:
         "🧪 TEST — nothing is live, don't bet on this.\n" +
         "Enter now · settles ~14:35 UTC (sent 4s after the close).\n" +
-        "CORE −2.1% and BTC −0.6% in 30 min, near the 24h low — won 60% in testing.",
+        "CORE −2.1% and BTC −0.6% in 30 min, near the 24h low — won 56% in testing.",
       strategy: "fade-watch",
       live: false,
       ts: Date.now(),

@@ -40,13 +40,13 @@ name: Fade watch
 # Sandwich setups are logged to data/fade-sandwiches.jsonl either way.
 # FADE_SANDWICH=off disables them entirely.
 #
-# Quiet (default): only fade calls near the 24h low are sent, in two lines;
-# the others are logged to data/fade-shadow.jsonl and scored by --report.
+# Quiet (default): every fade call is sent in two lines; near-low ones are
+# marked (unproven, scored separately by --report), top-of-range ones cautioned.
 # "Bet losing" warnings, review replies and stage-change messages are logged
-# but not sent. The daily imbalance callout still is (IMBALANCE_OFF=1 stops
-# it). Variables: FADE_QUIET=off brings
-# them all back; FADE_NEAR_LOW=tag sends every call (near-low ones marked,
-# top-of-range ones cautioned), =off drops the band check.
+# but not sent. The daily imbalance callout is sent (IMBALANCE_OFF=1 stops it).
+# FADE_QUIET=off brings back long alerts and every message; FADE_NEAR_LOW=only
+# sends near-low calls only (others logged to data/fade-shadow.jsonl), =off
+# drops the band check.
 #
 # Reviews: when a call settles, the bot replies under the alert with how it
 # played out — clean win, narrow loss, gave it back, or a complete blowout.
