@@ -96,7 +96,11 @@ concurrency:
 
 jobs:
   watch:
-    runs-on: ubuntu-latest
+    # FADE_RUNNER picks the machine. Unset = GitHub's runners (free while the
+    # repo is public). Before making the repo private, register a self-hosted
+    # runner (Settings → Actions → Runners) and set FADE_RUNNER=self-hosted:
+    # this job runs 24/7 (~43,000 min/month), far past a private repo's allowance.
+    runs-on: ${{ vars.FADE_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 230
     steps:
       - uses: actions/checkout@v4
@@ -213,6 +217,9 @@ jobs:
           name: fade-journal
           path: apps/prdt-bot/data
           if-no-files-found: ignore
+          # A fresh copy every job: keep a few days, not the 90-day default
+          # (private repos count artifacts against a 500 MB / 1 GB allowance).
+          retention-days: 5
       # Last step on purpose: the successor queues behind this job and starts
       # seconds after it exits. Skipped for test/report runs and when cancelled.
       - name: Start the next watch job
