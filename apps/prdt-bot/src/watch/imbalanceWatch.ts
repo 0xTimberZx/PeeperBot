@@ -40,6 +40,8 @@ export interface ImbalanceWatchConfig {
   capMs: number;
   scanEveryMin: number;
   statePath: string | null;
+  /** Price sources to try in order (IMBALANCE_FEED); default the global feed chain. */
+  sources?: string[];
 }
 
 interface ImbalanceState {
@@ -79,7 +81,8 @@ export class ImbalanceWatcher {
   constructor(
     private readonly cfg: ImbalanceWatchConfig,
     private readonly dispatcher: AlertDispatcher,
-    private readonly fetch: HistoryFetch = (symbol, interval, count, endTime) => fetchHistory({ symbol, interval, count, endTime })
+    private readonly fetch: HistoryFetch = (symbol, interval, count, endTime) =>
+      fetchHistory({ symbol, interval, count, endTime, sources: cfg.sources })
   ) {}
 
   /** Refresh one symbol's candles: a full year once a day, the last few bars otherwise. */
@@ -206,6 +209,9 @@ export function imbalanceConfigFromEnv(env: NodeJS.ProcessEnv = process.env): Im
     capMs: num("IMBALANCE_CAP_HOURS", 24) * 3_600_000,
     scanEveryMin: num("IMBALANCE_SCAN_MIN", 15),
     statePath: raw("IMBALANCE_STATE_PATH") ?? "./data/imbalance-state.json",
+    // A year of 4h bars is 2 requests on KuCoin (1500/page) vs 22 on OKX (100/page),
+    // which got rate-limited; Bybit refuses US cloud runners. OKX stays as last resort.
+    sources: (raw("IMBALANCE_FEED") ?? "kucoin,gate,okx").split(",").map((s) => s.trim()).filter(Boolean),
   };
 }
 
