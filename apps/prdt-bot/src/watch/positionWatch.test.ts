@@ -127,3 +127,28 @@ describe("profit give-back guard", () => {
     expect(r.state.peakFav).toBeLessThan(800);
   });
 });
+
+describe("losing calls' settle line", () => {
+  const from = Date.UTC(2026, 10, 20);
+  const c = (over: Partial<{ symbol: string; alertTs: number; finalPct: number; settlePrice: number }>) => ({
+    symbol: "BTCUSDT", alertTs: from + 3_600_000, finalPct: -0.002, settlePrice: 58_000, ...over,
+  });
+
+  it("averages this coin's losing calls since the start date and compares with price", async () => {
+    const { lossSettleLine } = await import("./positionWatch.js");
+    const calls = [
+      c({ settlePrice: 58_000 }),
+      c({ settlePrice: 60_000, finalPct: 0 }), // a flat settle is a loss
+      c({ settlePrice: 70_000, finalPct: 0.003 }), // a win: left out
+      c({ settlePrice: 40_000, alertTs: from - 1 }), // before the start date
+      c({ settlePrice: 3_000, symbol: "ETHUSDT" }), // other coin
+    ];
+    expect(lossSettleLine(calls, "BTCUSDT", from, 60_000)).toBe("Bot's losing calls since Nov 20 settled at 59,000 on average (2 calls) — 1.7% below price.");
+    expect(lossSettleLine(calls, "BTCUSDT", from, 58_000)).toContain("1.7% above price");
+  });
+
+  it("is omitted when there are none", async () => {
+    const { lossSettleLine } = await import("./positionWatch.js");
+    expect(lossSettleLine([c({ finalPct: 0.01 })], "BTCUSDT", from, 60_000)).toBeNull();
+  });
+});

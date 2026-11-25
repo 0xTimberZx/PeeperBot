@@ -70,6 +70,7 @@ import {
 import {
   evaluatePosition,
   evaluateProfitGuard,
+  lossSettleLine,
   sampleBody,
   type PositionSpec,
   type ProfitGuardParams,
@@ -567,6 +568,17 @@ async function cmdPosWatch(flags: Map<string, string>): Promise<void> {
     givebackFrac: Number(envOrP("giveback", "POS_GIVEBACK") ?? 0.5),
   };
 
+  // Optional reference line: where the bot's losing calls on this coin settled
+  // since POS_LOSS_FROM (a date, e.g. 2026-11-20). Unset = off.
+  const lossFromRaw = envOrP("loss-from", "POS_LOSS_FROM");
+  const lossFrom = lossFromRaw ? Date.parse(`${lossFromRaw}T00:00:00Z`) : NaN;
+  const reviewsPath = process.env.POS_REVIEWS_PATH ?? process.env.FADE_REVIEWS_PATH ?? "./data/fade-reviews.jsonl";
+  const withLossLine = (body: string, price: number): string => {
+    if (!Number.isFinite(lossFrom)) return body;
+    const line = lossSettleLine(new FadeReviewLog(reviewsPath).readAll(), spec.symbol, lossFrom, price);
+    return line === null ? body : `${body}\n${line}`;
+  };
+
   const emit = (body: string) =>
     dispatcher.dispatch({
       symbol: spec.symbol,
@@ -620,8 +632,8 @@ async function cmdPosWatch(flags: Map<string, string>): Promise<void> {
       ...(guard.fired ? ["profit-guard"] : []),
     ];
     const isNew = (l: string) => !st.latched.includes(l);
-    if (res.hits.some((h) => h.heading === "toward" && isNew(h.label))) await emit(res.body);
-    if (guard.fired && isNew("profit-guard")) await emit(guard.body);
+    if (res.hits.some((h) => h.heading === "toward" && isNew(h.label))) await emit(withLossLine(res.body, res.price));
+    if (guard.fired && isNew("profit-guard")) await emit(withLossLine(guard.body, guard.price));
     if (active.every((l) => !isNew(l))) {
       console.log(`[poswatch] no new event · active=[${active.join(",")}] · price ${res.price} · profit ${(guard.profitPct * 100).toFixed(2)}%`);
     }
@@ -656,14 +668,14 @@ async function cmdPosWatch(flags: Map<string, string>): Promise<void> {
 
       if (res.triggered && !latched) {
         latched = true;
-        await emit(res.body);
+        await emit(withLossLine(res.body, res.price));
       } else if (!res.triggered && latched) {
         latched = false; // zone cleared — re-arm
       }
 
       if (guard.fired && !guardLatched) {
         guardLatched = true;
-        await emit(guard.body);
+        await emit(withLossLine(guard.body, guard.price));
       } else if (!guard.fired && guardLatched) {
         guardLatched = false; // pivot passed — re-arm
       }
