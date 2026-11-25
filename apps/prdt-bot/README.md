@@ -583,6 +583,18 @@ npm run bot:fadewatch -- --report   # score every past alert against price
   did well (63.8%) and is not flagged. Sandwich alerts in the window get a
   shorter warning. `--report` shows the live record in and out of the window.
   `FADE_NY_CAUTION=off` removes it. US market holidays are not excluded.
+- **Near the 24h low**: an alert whose signal bar closed in the bottom 10% of
+  the coin's last-24h range (lowest low → highest high), where that low has
+  not been retested since it formed, gets a 📍 line marking it the stronger
+  setup. Backtest (two 540-day windows, Dec 2023 → Nov 2026, BTC+ETH): these
+  calls won 59.6% (n=1,250) vs about 55% for the other fade calls, above
+  breakeven in 11 of 12 period thirds — but only 5 of 12 cleared the 95%
+  floor, and Dec 2024 → Jun 2025 was flat (BTC 52.9%, ETH 51.6%). So it tags
+  rather than blocks: the other calls still win above breakeven. Each call
+  records its band reading, and `--report` splits the live record near-low vs
+  the rest (judge at 100+ settled near-low calls). Outputs:
+  `reports/band-*-nearlow-thirds.txt`. `FADE_NEAR_LOW=only` sends near-low
+  calls only; `FADE_NEAR_LOW=off` turns the check off.
 - **MSTR confirm — Peeper 1.02**: every alert also records how MSTR moved
   over the same 30m window (OKX's MSTR perpetual; the feed falls back to the
   perpetual for symbols with no spot market). `--report` splits the live

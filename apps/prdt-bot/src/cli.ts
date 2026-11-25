@@ -37,7 +37,7 @@ import {
 } from "./analysis/entryAutopsy.js";
 import { analyzeLeadLag, formatLeadLag, wilsonLower, DEFAULT_LEADLAG_PARAMS, type LeadLagParams } from "./analysis/leadLag.js";
 import { analyzeFade, formatFade, DEFAULT_FADE_PARAMS, type FadeParams, type FadeSide } from "./analysis/fade.js";
-import { FadeWatcher, FadeJournal, confirmJoined, fadeWatchConfigFromEnv, inNyOpenWindow, scoreFadeCalls } from "./watch/fadeWatch.js";
+import { FadeWatcher, FadeJournal, confirmJoined, fadeWatchConfigFromEnv, inNyOpenWindow, isNearLowCall, scoreFadeCalls } from "./watch/fadeWatch.js";
 import { AaveHealthMonitor, aaveConfigFrom } from "./watch/aaveHealthRun.js";
 import { FadeOutcomeLog, TelegramInbox, callKey, formatRecord, latestOutcomes, withAutoMissed, yourRecord } from "./watch/fadeReplies.js";
 import { ImbalanceWatcher, imbalanceConfigFromEnv } from "./watch/imbalanceWatch.js";
@@ -878,6 +878,26 @@ async function cmdFadeWatch(flags: Map<string, string>): Promise<void> {
         console.log(`  ${sym.padEnd(10)} n=${s.n}  win ${p(s.wins / s.n)}${bt === undefined ? "" : `  (backtest ${p(bt)})`}`);
       }
       console.log(sc.settled < 100 ? `  Judge it at 100+ settled setups (~3–5 weeks); until then it's too few to tell from luck.` : sc.wilsonLow > breakeven ? `  The 95% floor is above breakeven: candidate to promote to a real alert.` : `  Not proven yet: the 95% floor is still below breakeven.`);
+    }
+    // Near the 24h low: is the stronger setup still stronger live?
+    const nl = watchCfg.nearLow;
+    if (nl !== undefined && nl.mode !== "off") {
+      const settled = calls.filter((c) => score.byCall[callKey(c)] !== undefined);
+      const group = (atLow: boolean | null) => {
+        const g = settled.filter((c) => isNearLowCall(c) === atLow);
+        return { n: g.length, w: g.filter((c) => score.byCall[callKey(c)]).length };
+      };
+      const low = group(true), rest = group(false), unknown = group(null);
+      const line = (label: string, g: { n: number; w: number }, bt: number) =>
+        `  ${label.padEnd(30)} n=${String(g.n).padStart(4)}  ${g.n > 0 ? `win ${p(g.w / g.n)} (95% floor ${p(wilsonLower(g.w, g.n))})` : "—"}  · backtest ${p(bt)}`;
+      console.log(`\nNear the 24h low — ${nl.mode === "only" ? "only these are sent" : "tagged on alerts"}`);
+      console.log(line(`near the 24h low`, low, nl.backtest.nearLow));
+      console.log(line(`other fade calls`, rest, nl.backtest.other));
+      if (unknown.n > 0) console.log(`  ${unknown.n} settled call(s) with no band reading (alerted before the filter, or not enough data)`);
+      if (low.n < 100) console.log(`  Judge it at 100+ settled near-low calls (${low.n} so far); until then it's too few to tell from luck.`);
+      else if (low.w / low.n > breakeven && (rest.n === 0 || low.w / low.n > rest.w / rest.n))
+        console.log(`  Holding up: near-low calls are beating breakeven and the other calls.`);
+      else console.log(`  Not holding up live: near-low calls aren't beating the rest the way the backtest did.`);
     }
     // Peeper 1.02: did the confirm symbol (MSTR) join the dump? Recorded, never filtered.
     const confirm = watchCfg.confirm;
