@@ -48,6 +48,17 @@ jobs:
         with:
           node-version: 20
           cache: npm
+      # Read-only: the fade watch's saved results, so position messages can say
+      # where the bot's losing calls settled (POS_LOSS_FROM). Never saved back.
+      # Same path and key prefix as fade-watch.yml. Runs before the latch
+      # restore so it can't overwrite poswatch-state.json.
+      - name: Restore fade-watch results (read-only)
+        uses: actions/cache/restore@v4
+        with:
+          path: apps/prdt-bot/data
+          key: fade-data-none
+          restore-keys: |
+            fade-data-
       - name: Restore latch
         uses: actions/cache/restore@v4
         with:
@@ -55,23 +66,6 @@ jobs:
           key: poswatch-state-${{ github.run_id }}
           restore-keys: |
             poswatch-state-
-      # Read-only: the fade watch's saved results, so position messages can say
-      # where the bot's losing calls settled (POS_LOSS_FROM). Never saved back.
-      # The path list must match fade-watch.yml exactly for the cache to match.
-      - name: Restore fade-watch results (read-only)
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            apps/prdt-bot/data/fadewatch-state.json
-            apps/prdt-bot/data/fade-journal.jsonl
-            apps/prdt-bot/data/fade-outcomes.jsonl
-            apps/prdt-bot/data/fade-reviews.jsonl
-            apps/prdt-bot/data/imbalance-state.json
-            apps/prdt-bot/data/fade-shadow.jsonl
-            apps/prdt-bot/data/fade-sandwiches.jsonl
-          key: fade-watch-none
-          restore-keys: |
-            fade-watch-
       - name: Install dependencies
         run: npm ci
       - name: Position tick (one-shot)
