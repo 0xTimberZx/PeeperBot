@@ -61,6 +61,7 @@ name: Fade watch
 # Imbalance callout: the same job scans BTC/ETH every 15 min and, at most once
 # per 24h (IMBALANCE_CAP_HOURS), calls out a fast move into a fresh 4h/daily
 # imbalance with its end level and historical odds. IMBALANCE_OFF=1 disables.
+# Its prices come from KuCoin, then Gate.io, then OKX (IMBALANCE_FEED to change).
 #
 # State: the open-call latch, the alert journal and your replies live in apps/prdt-bot/data
 # and are carried between jobs by actions/cache (the folder as one path, so new
@@ -169,6 +170,7 @@ jobs:
           IMBALANCE_TARGETS: ${{ vars.IMBALANCE_TARGETS }}
           IMBALANCE_CAP_HOURS: ${{ vars.IMBALANCE_CAP_HOURS }}
           IMBALANCE_OFF: ${{ vars.IMBALANCE_OFF }}
+          IMBALANCE_FEED: ${{ vars.IMBALANCE_FEED }}
           FADE_SHADOW: ${{ vars.FADE_SHADOW }}
           FADE_SANDWICH: ${{ vars.FADE_SANDWICH }}
           FADE_SANDWICH_DIP_PCT: ${{ vars.FADE_SANDWICH_DIP_PCT }}
