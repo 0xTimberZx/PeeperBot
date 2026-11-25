@@ -634,3 +634,43 @@ describe("quiet mode and the top-of-range caution", () => {
     }
   });
 });
+
+describe("where losing calls settled", () => {
+  const from = Date.UTC(2026, 10, 20);
+  const r = (over: Record<string, unknown>) => ({ symbol: "BTCUSDT", bet: "UP" as const, alertTs: from + 3_600_000, finalPct: -0.002, settlePrice: 58_000, ...over });
+
+  it("averages this coin's losing calls in the same direction since the start date", async () => {
+    const { losingCallsLine } = await import("./fadeWatch.js");
+    const calls = [
+      r({ settlePrice: 58_000 }),
+      r({ settlePrice: 60_000, finalPct: 0 }), // a flat settle is a loss
+      r({ settlePrice: 70_000, finalPct: 0.003 }), // a win
+      r({ settlePrice: 40_000, alertTs: from - 1 }), // before the start date
+      r({ settlePrice: 3_000, symbol: "ETHUSDT" }), // other coin
+      r({ settlePrice: 90_000, bet: "DOWN" }), // other direction
+    ];
+    expect(losingCallsLine(calls, "BTCUSDT", "UP", from, 60_180)).toBe("Losing UP calls since Nov 20 settled at 59,000 on average (2 calls) · now 2.0% higher.");
+    expect(losingCallsLine(calls, "BTCUSDT", "UP", from, 57_820)).toContain("now 2.0% lower");
+    expect(losingCallsLine([r({ finalPct: 0.01 })], "BTCUSDT", "UP", from, 60_000)).toBeNull();
+  });
+
+  it("appears on bet signals, long and quiet, counting only calls that were sent", async () => {
+    const { mkdtempSync, writeFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const { tmpdir } = await import("node:os");
+    for (const quiet of [false, true]) {
+      const dir = mkdtempSync(join(tmpdir(), "fadeloss-"));
+      const sentCall = { ts: 10, symbol: "BTCUSDT", lead: "COREUSDT", bet: "UP", barClose: -100, lateSec: 3, signalClose: 101, alertPrice: 101, settleAt: 20, holdMin: 30, leadPct: -0.02, ownPct: -0.005 };
+      const skipped = { ...sentCall, barClose: -200, rule: "not-near-low" };
+      writeFileSync(join(dir, "j.jsonl"), [sentCall, skipped].map((c) => JSON.stringify(c)).join("\n") + "\n");
+      writeFileSync(join(dir, "r.jsonl"), [
+        { symbol: "BTCUSDT", bet: "UP", barClose: -100, alertTs: 10, finalPct: -0.001, settlePrice: 100 },
+        { symbol: "BTCUSDT", bet: "UP", barClose: -200, alertTs: 10, finalPct: -0.001, settlePrice: 50 }, // skipped: not counted
+      ].map((x) => JSON.stringify(x)).join("\n") + "\n");
+      const { w, sent } = watcher({ COREUSDT: candles([100, 100, 98]), BTCUSDT: candles([100, 100, 99.5]) },
+        { journalPath: join(dir, "j.jsonl"), reviewsPath: join(dir, "r.jsonl"), lossFrom: 0, quiet });
+      await w.tick(3 * BAR + 4000);
+      expect(sent[0]!.reason).toContain("Losing UP calls since Jan 1 settled at 100 on average (1 call) · now 0.5% lower.");
+    }
+  });
+});

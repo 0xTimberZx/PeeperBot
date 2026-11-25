@@ -70,7 +70,8 @@ import {
 import {
   evaluatePosition,
   evaluateProfitGuard,
-  lossSettleLine,
+  numSetting,
+  setting,
   sampleBody,
   type PositionSpec,
   type ProfitGuardParams,
@@ -522,7 +523,8 @@ async function emitTrack(
 }
 
 function positionSpecFrom(flags: Map<string, string>): PositionSpec {
-  const envOr = (flag: string, env: string) => flags.get(flag) ?? process.env[env];
+  // Blank settings (a blank or deleted repo variable arrives as "") fall back to defaults.
+  const envOr = (flag: string, env: string) => setting(flags.get(flag) ?? process.env[env]);
   const symbol = (envOr("symbol", "POS_SYMBOL") ?? "BTCUSDT").toUpperCase();
   const sideRaw = (envOr("side", "POS_SIDE") ?? "short").toLowerCase();
   const side: PosSide = sideRaw === "long" || sideRaw === "buy" || sideRaw === "up" ? "long" : "short";
@@ -532,7 +534,8 @@ function positionSpecFrom(flags: Map<string, string>): PositionSpec {
     .split(",")
     .map((s) => Number(s.trim()))
     .filter((n) => Number.isFinite(n) && n > 0);
-  const proximityPct = Number(envOr("proximity", "POS_PROXIMITY") ?? 0.005);
+  const proximity = numSetting(envOr("proximity", "POS_PROXIMITY"), 0.005);
+  const proximityPct = proximity > 0 ? proximity : 0.005;
 
   if (!Number.isFinite(entry) || entry <= 0) throw new Error("poswatch: --entry <price> is required (a positive number)");
   if (!Number.isFinite(stop) || stop <= 0) throw new Error("poswatch: --stop <price> is required (a positive number)");
@@ -546,7 +549,7 @@ async function cmdPosWatch(flags: Map<string, string>): Promise<void> {
   // Scheduled cron with no position configured yet: no-op cleanly (exit 0) so an
   // unarmed watcher doesn't fail the job and email you. Manual runs still error.
   if (flags.get("once") === "true") {
-    const val = (flag: string, env: string) => Number(flags.get(flag) ?? process.env[env]);
+    const val = (flag: string, env: string) => numSetting(flags.get(flag) ?? process.env[env], NaN);
     const missing: string[] = [];
     if (!(val("entry", "POS_ENTRY") > 0)) missing.push("POS_ENTRY");
     if (!(val("stop", "POS_STOP") > 0)) missing.push("POS_STOP");
@@ -561,22 +564,15 @@ async function cmdPosWatch(flags: Map<string, string>): Promise<void> {
   // Profit give-back guard: keys off your BLENDED breakeven (defaults to entry).
   // --profit is a % favorable move that arms it (0.25 => a 0.25% move in your
   // favor); --giveback is the fraction of the peak surrendered that fires it.
-  const envOrP = (flag: string, env: string) => flags.get(flag) ?? process.env[env];
-  const breakeven = Number(envOrP("breakeven", "POS_BREAKEVEN") ?? spec.entry);
+  // Blank = unset: breakeven falls back to your entry, the guard to 0.25% / half the peak.
+  const envOrP = (flag: string, env: string) => setting(flags.get(flag) ?? process.env[env]);
+  const be = numSetting(envOrP("breakeven", "POS_BREAKEVEN"), spec.entry);
+  const breakeven = be > 0 ? be : spec.entry;
+  const arm = numSetting(envOrP("profit", "POS_PROFIT_TARGET"), 0.25);
+  const giveback = numSetting(envOrP("giveback", "POS_GIVEBACK"), 0.5);
   const guardParams: ProfitGuardParams = {
-    armPct: Number(envOrP("profit", "POS_PROFIT_TARGET") ?? 0.25) / 100,
-    givebackFrac: Number(envOrP("giveback", "POS_GIVEBACK") ?? 0.5),
-  };
-
-  // Optional reference line: where the bot's losing calls on this coin settled
-  // since POS_LOSS_FROM (a date, e.g. 2026-11-20). Unset = off.
-  const lossFromRaw = envOrP("loss-from", "POS_LOSS_FROM");
-  const lossFrom = lossFromRaw ? Date.parse(`${lossFromRaw}T00:00:00Z`) : NaN;
-  const reviewsPath = process.env.POS_REVIEWS_PATH ?? process.env.FADE_REVIEWS_PATH ?? "./data/fade-reviews.jsonl";
-  const withLossLine = (body: string, price: number): string => {
-    if (!Number.isFinite(lossFrom)) return body;
-    const line = lossSettleLine(new FadeReviewLog(reviewsPath).readAll(), spec.symbol, lossFrom, price);
-    return line === null ? body : `${body}\n${line}`;
+    armPct: (arm > 0 ? arm : 0.25) / 100,
+    givebackFrac: giveback > 0 && giveback <= 1 ? giveback : 0.5,
   };
 
   const emit = (body: string) =>
@@ -632,8 +628,8 @@ async function cmdPosWatch(flags: Map<string, string>): Promise<void> {
       ...(guard.fired ? ["profit-guard"] : []),
     ];
     const isNew = (l: string) => !st.latched.includes(l);
-    if (res.hits.some((h) => h.heading === "toward" && isNew(h.label))) await emit(withLossLine(res.body, res.price));
-    if (guard.fired && isNew("profit-guard")) await emit(withLossLine(guard.body, guard.price));
+    if (res.hits.some((h) => h.heading === "toward" && isNew(h.label))) await emit(res.body);
+    if (guard.fired && isNew("profit-guard")) await emit(guard.body);
     if (active.every((l) => !isNew(l))) {
       console.log(`[poswatch] no new event · active=[${active.join(",")}] · price ${res.price} · profit ${(guard.profitPct * 100).toFixed(2)}%`);
     }
@@ -668,14 +664,14 @@ async function cmdPosWatch(flags: Map<string, string>): Promise<void> {
 
       if (res.triggered && !latched) {
         latched = true;
-        await emit(withLossLine(res.body, res.price));
+        await emit(res.body);
       } else if (!res.triggered && latched) {
         latched = false; // zone cleared — re-arm
       }
 
       if (guard.fired && !guardLatched) {
         guardLatched = true;
-        await emit(withLossLine(guard.body, guard.price));
+        await emit(guard.body);
       } else if (!guard.fired && guardLatched) {
         guardLatched = false; // pivot passed — re-arm
       }

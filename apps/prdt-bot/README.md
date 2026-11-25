@@ -575,6 +575,12 @@ npm run bot:fadewatch -- --report   # score every past alert against price
   64,350 (2 calls) · now 64,210, 0.22% lower" — so you can see whether this
   entry is higher or lower than recent calls. Shadow (never-sent) calls are
   left out.
+- **Where losing calls settled**: each bet signal (long or quiet) also shows
+  the average settle price of that coin's losing calls in the same direction
+  since `FADE_LOSS_FROM` (default 2026-11-20 in the workflow) — e.g. "Losing UP
+  calls since Nov 20 settled at 58,229 on average (5 calls) · now 3.1% higher",
+  roughly where failed bounces ended. Only calls that were actually sent count.
+  `FADE_LOSS_FROM=off` removes it.
 - **NY open caution**: an alert fired 09:00–10:30 New York time on a weekday
   ends with a warning to consider skipping it or betting smaller. In the
   540-day backtest the rule won only 52.7% in that window (165 trades; 42 /

@@ -240,30 +240,21 @@ function buildGuardBody(
   ].join("\n");
 }
 
-/** What `lossSettleLine` needs from a post-settle review of one bot call. */
-export interface SettledCall {
-  symbol: string;
-  alertTs: number;
-  finalPct: number; // in the bet's favour; ≤ 0 = lost (a flat settle loses)
-  settlePrice: number;
+/**
+ * A setting from a flag or env var, with blank treated as unset. GitHub passes
+ * a repo variable that is blank — or deleted — as an empty string, which must
+ * fall back to the default rather than read as 0.
+ */
+export function setting(raw: string | undefined): string | undefined {
+  const t = raw?.trim();
+  return t ? t : undefined;
 }
 
-/**
- * Where the bot's losing calls on this coin settled since `fromTs`: their
- * average settle price, and how far it is from the price now. A reference
- * level only — your position's profit is still measured from your avg entry.
- * Null when there are none.
- */
-export function lossSettleLine(calls: readonly SettledCall[], symbol: string, fromTs: number, price: number): string | null {
-  const lost = calls.filter((c) => c.symbol === symbol && c.alertTs >= fromTs && c.finalPct <= 0 && c.settlePrice > 0);
-  if (lost.length === 0) return null;
-  const avg = lost.reduce((a, c) => a + c.settlePrice, 0) / lost.length;
-  const since = new Date(fromTs).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
-  const vs = price > 0 ? avg / price - 1 : 0;
-  return (
-    `Bot's losing calls since ${since} settled at ${fmt(avg)} on average (${lost.length} call${lost.length === 1 ? "" : "s"})` +
-    (price > 0 ? ` — ${Math.abs(vs * 100).toFixed(1)}% ${vs >= 0 ? "above" : "below"} price.` : ".")
-  );
+/** A numeric setting: blank or not a number → `def`. */
+export function numSetting(raw: string | undefined, def: number): number {
+  const t = setting(raw);
+  const n = t === undefined ? NaN : Number(t);
+  return Number.isFinite(n) ? n : def;
 }
 
 /** A canned sample used by `poswatch --test` to prove phone delivery without a

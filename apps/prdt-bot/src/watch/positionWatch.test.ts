@@ -128,27 +128,21 @@ describe("profit give-back guard", () => {
   });
 });
 
-describe("losing calls' settle line", () => {
-  const from = Date.UTC(2026, 10, 20);
-  const c = (over: Partial<{ symbol: string; alertTs: number; finalPct: number; settlePrice: number }>) => ({
-    symbol: "BTCUSDT", alertTs: from + 3_600_000, finalPct: -0.002, settlePrice: 58_000, ...over,
+describe("blank settings", () => {
+  it("treats blank, whitespace or missing as unset", async () => {
+    const { setting } = await import("./positionWatch.js");
+    expect(setting("")).toBeUndefined();
+    expect(setting("   ")).toBeUndefined();
+    expect(setting(undefined)).toBeUndefined();
+    expect(setting(" 64465 ")).toBe("64465");
   });
 
-  it("averages this coin's losing calls since the start date and compares with price", async () => {
-    const { lossSettleLine } = await import("./positionWatch.js");
-    const calls = [
-      c({ settlePrice: 58_000 }),
-      c({ settlePrice: 60_000, finalPct: 0 }), // a flat settle is a loss
-      c({ settlePrice: 70_000, finalPct: 0.003 }), // a win: left out
-      c({ settlePrice: 40_000, alertTs: from - 1 }), // before the start date
-      c({ settlePrice: 3_000, symbol: "ETHUSDT" }), // other coin
-    ];
-    expect(lossSettleLine(calls, "BTCUSDT", from, 60_000)).toBe("Bot's losing calls since Nov 20 settled at 59,000 on average (2 calls) — 1.7% below price.");
-    expect(lossSettleLine(calls, "BTCUSDT", from, 58_000)).toContain("1.7% above price");
-  });
-
-  it("is omitted when there are none", async () => {
-    const { lossSettleLine } = await import("./positionWatch.js");
-    expect(lossSettleLine([c({ finalPct: 0.01 })], "BTCUSDT", from, 60_000)).toBeNull();
+  it("falls back to the default for blank or non-numeric values instead of reading 0", async () => {
+    const { numSetting } = await import("./positionWatch.js");
+    expect(numSetting("", 0.25)).toBe(0.25); // GitHub passes a blank repo variable as ""
+    expect(numSetting("abc", 0.5)).toBe(0.5);
+    expect(numSetting(undefined, 64_000)).toBe(64_000);
+    expect(numSetting("0.4", 0.25)).toBe(0.4);
+    expect(numSetting("0", 0.25)).toBe(0); // a real 0 is kept; callers reject it where 0 is meaningless
   });
 });
