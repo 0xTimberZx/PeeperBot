@@ -59,6 +59,20 @@ describe("24h band", () => {
     expect(text).toContain("joint dump → UP 5m)");
   });
 
+  it("splits fade calls in the top fifth of the band by period third", () => {
+    // Band 90 → 100 (low at bar 5); the dump closes at 99.2 = 92% up the band.
+    const n = 30;
+    const target = bars([...flat(5, 99, 100), [90, 100, 99.9], ...flat(n - 8, 99, 100), [99.1, 99.6, 99.2], [99.2, 99.7, 99.6]] as [number, number, number][]);
+    const leadCloses = target.map((_, i) => (i === n - 2 ? 0.97 : 1));
+    const lead = target.map((c, i) => ({ ...c, open: leadCloses[i]!, high: leadCloses[i]!, low: leadCloses[i]!, close: leadCloses[i]! }));
+    const fp = { windowBars: 1, holdBars: 1, leadMovePct: 0.015, ownMovePct: 0.0015, side: "dump" as const };
+    const r = analyzeBand(lead, target, { ...P, lookbackBars: 26 }, fp);
+    expect(r.fade.byFifth[4]).toMatchObject({ n: 1, wins: 1 });
+    // Same calls as the 80–100% row, split by time: this one falls in the newest third.
+    expect(r.fade.thirdsTopFifth.map((t) => t.bucket.n)).toEqual([0, 0, 1]);
+    expect(formatBand(r, { lead: "COREUSDT", target: "BTCUSDT", breakeven: 0.526 })).toContain("top fifth of the band (80–100%), in each third of the period:");
+  });
+
   it("scores section A with the fade hold it is given, not a fixed 30m", () => {
     // Lead + target dump at bar 28; the target is up 1 bar later but back down 2 bars later.
     const n = 30;
