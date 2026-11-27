@@ -100,7 +100,10 @@ jobs:
     # repo is public). Before making the repo private, register a self-hosted
     # runner (Settings → Actions → Runners) and set FADE_RUNNER=self-hosted:
     # this job runs 24/7 (~43,000 min/month), far past a private repo's allowance.
-    runs-on: ${{ vars.FADE_RUNNER || 'ubuntu-latest' }}
+    # Only the word "self-hosted" switches runners. Anything else — unset, blank,
+    # or a stray space (which GitHub treats as a real label, so the job would
+    # queue forever) — stays on GitHub's runners.
+    runs-on: ${{ contains(vars.FADE_RUNNER, 'self-hosted') && 'self-hosted' || 'ubuntu-latest' }}
     timeout-minutes: 230
     steps:
       - uses: actions/checkout@v4
