@@ -25,7 +25,9 @@ name: Aave health
 
 on:
   schedule:
-    - cron: "*/10 * * * *"
+    # Hourly (was every 10 min): fewer runner jobs; a loan drifts toward
+    # liquidation over hours, and the Aave app is the place to watch a fast move.
+    - cron: "23 * * * *"
   workflow_dispatch:
     inputs:
       test: { description: "Send a sample alert and exit", required: false }

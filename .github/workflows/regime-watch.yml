@@ -18,9 +18,9 @@ name: Regime watch
 
 on:
   schedule:
-    # Every 30 minutes. GitHub schedules are best-effort and can lag 5–15 min
-    # under load — fine for a macro radar (this is not the minute-timing game).
-    - cron: "*/30 * * * *"
+    # Hourly (was every 30 min), to keep runner jobs down. GitHub schedules are
+    # best-effort and can lag 5–15 min — fine for a macro radar.
+    - cron: "41 * * * *"
   workflow_dispatch: {} # manual "Run workflow" button for an on-demand check
 
 # Only one regime tick at a time; never cancel an in-flight run mid-alert.

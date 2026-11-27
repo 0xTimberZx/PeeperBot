@@ -7,8 +7,15 @@ name: CI
 on:
   push:
     branches: [main]
+    paths-ignore: ["**.md", "**/reports/**"]
   pull_request:
     branches: [main]
+    paths-ignore: ["**.md", "**/reports/**"]
+
+# A newer push to the same PR/branch cancels the older run.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
