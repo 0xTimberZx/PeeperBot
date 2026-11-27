@@ -18,9 +18,9 @@ name: CORE-bottom watch
 
 on:
   schedule:
-    # Every 30 minutes. This is a positional "get ready" alert, not an entry
+    # Hourly (was every 30 min), to keep runner jobs down. This is a positional "get ready" alert, not an entry
     # trigger, so schedule lag (5–15 min) is immaterial.
-    - cron: "*/30 * * * *"
+    - cron: "11 * * * *"
   workflow_dispatch: {} # manual "Run workflow" button for an on-demand check
 
 # Only one watch tick at a time; never cancel an in-flight run mid-alert.
