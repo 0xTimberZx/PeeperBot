@@ -879,7 +879,8 @@ async function cmdFadeWatch(flags: Map<string, string>): Promise<void> {
     }
     // Shadow rules: logged and scored like real calls, never alerted.
     const shadowCalls = new FadeJournal(watchCfg.shadowJournalPath ?? "./data/fade-shadow.jsonl").readAll();
-    for (const rule of watchCfg.shadowRules) {
+    // Quiet unless asked for: `fadewatch --report --shadow`.
+    for (const rule of flags.get("shadow") === "true" ? watchCfg.shadowRules : []) {
       const mine = shadowCalls.filter((c) => c.rule === rule.id);
       const sc = await scoreFadeCalls(mine, Date.now(), priceAtSettle);
       console.log(`\nShadow · ${rule.label} (${rule.id}) — logged, not alerted`);
@@ -889,7 +890,7 @@ async function cmdFadeWatch(flags: Map<string, string>): Promise<void> {
         const bt = rule.backtest[sym];
         console.log(`  ${sym.padEnd(10)} n=${s.n}  win ${p(s.wins / s.n)}${bt === undefined ? "" : `  (backtest ${p(bt)})`}`);
       }
-      console.log(sc.settled < 100 ? `  Judge it at 100+ settled setups (~3–5 weeks); until then it's too few to tell from luck.` : sc.wilsonLow > breakeven ? `  The 95% floor is above breakeven: candidate to promote to a real alert.` : `  Not proven yet: the 95% floor is still below breakeven.`);
+      console.log(sc.settled < 100 ? `  Judge it at 100+ settled setups; until then it's too few to tell from luck.` : sc.wilsonLow > breakeven ? `  The 95% floor is above breakeven: candidate to promote to a real alert.` : `  Not proven yet: the 95% floor is still below breakeven.`);
     }
     // Near the 24h low: is the stronger setup still stronger live?
     const nl = watchCfg.nearLow;
@@ -1616,6 +1617,7 @@ async function main(): Promise<void> {
           `                     # reply won / lost / missed to an alert in Telegram to log your own result\n` +
           `                     # after each call settles it replies with a review (clean win … complete blowout)\n` +
           `                     # --review grades past settled calls without messaging\n` +
+          `                     # --report --shadow adds the shadow rules (quiet otherwise)\n` +
           `  peeperbot pivotfollow [--lead COREUSDT] [--follow BTCUSDT,ETHUSDT] [--days 60] [--wait 30] [--hold 35] [--dir up|down]\n` +
           `                     #   [--session london|ny|asia] [--skip-days 180]\n` +
           `                     # backtest: lead asset prints a pivot → wait → hold BTC/ETH the same way\n` +

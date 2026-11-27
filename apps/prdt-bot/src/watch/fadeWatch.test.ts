@@ -251,7 +251,7 @@ describe("ARB_15M_SHADOW", () => {
   it("is the backtested rule: 15m window and hold, ARB ≥1.5% and target ≥0.15% dump", async () => {
     const { ARB_15M_SHADOW, fadeWatchConfigFromEnv } = await import("./fadeWatch.js");
     expect(ARB_15M_SHADOW.params).toEqual({ windowBars: 3, holdBars: 3, leadMovePct: 0.015, ownMovePct: 0.0015, side: "dump" });
-    expect(fadeWatchConfigFromEnv({ lead: "COREUSDT", breakeven: 0.526 }).shadowRules.map((r) => r.id)).toEqual(["arb15"]);
+    expect(fadeWatchConfigFromEnv({ lead: "COREUSDT", breakeven: 0.526 }).shadowRules.map((r) => r.id)).toContain("arb15");
     process.env["FADE_SHADOW"] = "off";
     try {
       expect(fadeWatchConfigFromEnv({ lead: "COREUSDT", breakeven: 0.526 }).shadowRules).toEqual([]);
@@ -672,5 +672,41 @@ describe("where losing calls settled", () => {
       await w.tick(3 * BAR + 4000);
       expect(sent[0]!.reason).toContain("Losing UP calls since Jan 1 settled at 100 on average (1 call) · now 0.5% lower.");
     }
+  });
+});
+
+describe("POLYMARKET_HOURLY_SHADOW", () => {
+  it("logs only setups whose 5m close lands on the hour, held 60m", async () => {
+    const { mkdtempSync, readFileSync, existsSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const { tmpdir } = await import("node:os");
+    const dir = mkdtempSync(join(tmpdir(), "pmhour-"));
+    const rule = { id: "pmhour", label: "test", lead: "COREUSDT", params: P, backtest: {}, alignMin: 60 };
+    const H = 3_600_000;
+    // A dump whose signal bar closes at `close` (bar k = 2): setups at 01:00 (on the hour) and 01:05 (not).
+    const run = async (closeMs: number) => {
+      const base = closeMs - 3 * BAR;
+      const shift = (cs: Candle[]) => cs.map((c) => ({ ...c, openTime: c.openTime + base, closeTime: c.closeTime + base }));
+      const all = { COREUSDT: shift(candles([100, 100, 98])), BTCUSDT: shift(candles([100, 100, 99.5])) };
+      const w = new FadeWatcher(
+        { lead: "COREUSDT", targets: ["BTCUSDT"], interval: "5m", params: { ...P, leadMovePct: 0.5 }, maxLateSec: 120, wakeOffsetSec: 3, statePath: null,
+          journalPath: null, outcomesPath: null, reviewsPath: null, backtestBlowoutRate: {}, backtest: {}, breakeven: 0.526, autoMissAfterMin: 120, againstPct: 0,
+          shadowRules: [rule], shadowJournalPath: join(dir, `${closeMs}.jsonl`), confidence: { window: 50, minSettled: 50, upAt: 0.55, downBelow: 0.526 },
+          sandwich: { enabled: false, dipPct: 0.002, withinMin: 15 }, sandwichesPath: null, confirm: null, nyOpenCaution: false },
+        new AlertDispatcher([]),
+        async (s) => all[s as keyof typeof all]
+      );
+      await w.evaluateShadow(closeMs + 4000, new Map([["BTCUSDT", all.BTCUSDT]]));
+      const f = join(dir, `${closeMs}.jsonl`);
+      return existsSync(f) ? readFileSync(f, "utf8").trim().split("\n").map((l) => JSON.parse(l)) : [];
+    };
+    expect(await run(H)).toEqual([expect.objectContaining({ rule: "pmhour", holdMin: 10 })]);
+    expect(await run(H + BAR)).toEqual([]);
+  });
+
+  it("ships enabled with the backtested hourly shape", async () => {
+    const { POLYMARKET_HOURLY_SHADOW, fadeWatchConfigFromEnv } = await import("./fadeWatch.js");
+    expect(POLYMARKET_HOURLY_SHADOW).toMatchObject({ alignMin: 60, params: { windowBars: 6, holdBars: 12 } });
+    expect(fadeWatchConfigFromEnv({ lead: "COREUSDT", breakeven: 0.526 }).shadowRules.map((r) => r.id)).toEqual(["arb15", "pmhour"]);
   });
 });

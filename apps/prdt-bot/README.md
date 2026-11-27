@@ -568,6 +568,11 @@ npm run bot:fadewatch -- --report   # score every past alert against price
   target down ≥ 0.15% over 15m → target UP for 15m. Backtest (540 days):
   ETH 57.3%, BTC 56.3%, above breakeven in all three periods — but it was found
   by slicing results after looking, which is why it starts in shadow.
+  The second is `pmhour`, **Polymarket hourly**: the same CORE + BTC/ETH
+  fade, counted only when the 5m close lands on the hour and held 60m — the
+  shape of Polymarket's hourly "Up or Down" markets, whose strike is the
+  hour's open (breakeven about 51% near $0.505 a share). Backtest (540 days):
+  ETH 57.3%, BTC 55.4%, about 0.8 setups a day, so judging it takes months.
   `FADE_SHADOW=off` disables shadow rules.
 - **Average entry of recent calls**: every bet signal shows the average entry
   price of the bot's calls on that coin in the same direction over the last
