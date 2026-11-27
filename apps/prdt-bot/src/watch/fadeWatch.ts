@@ -575,7 +575,7 @@ export class FadeWatcher {
 
   /**
    * Evaluate the shadow rules on the bar that just closed and journal any setup.
-   * Never sends anything. Uses the same one-position-at-a-time and lateness
+   * Never sends or prints anything (quiet until you ask: `--report --shadow`). Uses the same one-position-at-a-time and lateness
    * rules as real alerts, so its record is comparable.
    */
   async evaluateShadow(now: number, targets: ReadonlyMap<string, readonly Candle[]>): Promise<number> {
@@ -585,7 +585,6 @@ export class FadeWatcher {
     for (const rule of this.cfg.shadowRules) {
       const lead = await this.fetch(rule.lead, this.cfg.interval, rule.params.windowBars + 4);
       if (!lead.some((c) => c.closeTime === expectedClose)) {
-        console.log(`[fadewatch] shadow ${rule.id}: ${rule.lead} bar not printed yet — skipped this close`);
         continue;
       }
       const holdMs = rule.params.holdBars * this.barMs;
@@ -606,7 +605,6 @@ export class FadeWatcher {
           alertPrice, settleAt: now + holdMs, holdMin: Math.round(holdMs / 60_000), leadPct: sig.leadPct, ownPct: sig.ownPct, rule: rule.id,
         });
         logged++;
-        console.log(`[fadewatch] shadow ${rule.id} ${symbol}: setup logged, no alert — ${rule.lead} ${pct(sig.leadPct)}, ${symbol} ${pct(sig.ownPct)} → ${sig.bet} ${Math.round(holdMs / 60_000)}m`);
       }
     }
     this.persist();
