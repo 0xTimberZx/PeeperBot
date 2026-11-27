@@ -349,6 +349,12 @@ export interface ShadowRule {
   params: FadeParams;
   /** Backtest win rate per target, for the report. */
   backtest: Record<string, number>;
+  /**
+   * Only count a setup whose 5m bar closes on a multiple of this many minutes
+   * (60 = on the hour) — for venues whose bets open on a fixed clock, so the
+   * strike is the window's open price. Absent = any close.
+   */
+  alignMin?: number;
 }
 
 export interface FadeWatchConfig {
@@ -586,6 +592,7 @@ export class FadeWatcher {
       for (const [symbol, candles] of targets) {
         const sig = evaluateFadeSignal(lead, candles, rule.params, now);
         if (sig === null) continue;
+        if (rule.alignMin !== undefined && (sig.barClose + 1) % (rule.alignMin * 60_000) !== 0) continue;
         const key = `${rule.id}:${symbol}`;
         if ((this.state.handled[key] ?? 0) >= sig.barClose) continue;
         this.state.handled[key] = sig.barClose;
@@ -1034,6 +1041,23 @@ export const ARB_15M_SHADOW: ShadowRule = {
   backtest: { ETHUSDT: 0.573, BTCUSDT: 0.563 },
 };
 
+/**
+ * The live fade setup, only when the 5m close lands on the hour, held 60m —
+ * the shape of Polymarket's hourly "Bitcoin/Ethereum Up or Down" markets,
+ * whose strike is the hour's open price. Breakeven there is about 51% if Up
+ * can be bought near $0.505. Backtest, 540 days to 2026-11-10, OKX 5m: ETH
+ * 57.3% (62.1 / 51.0 / 62.5% by period, 218 trades), BTC 55.4% (54.7 / 53.7 /
+ * 58.3%, 195). Thin and found after looking, so it starts in shadow.
+ */
+export const POLYMARKET_HOURLY_SHADOW: ShadowRule = {
+  id: "pmhour",
+  label: "Polymarket hourly (on-the-hour fade, 60m)",
+  lead: "COREUSDT",
+  params: { windowBars: 6, holdBars: 12, leadMovePct: 0.015, ownMovePct: 0.0015, side: "dump" },
+  backtest: { ETHUSDT: 0.573, BTCUSDT: 0.554 },
+  alignMin: 60,
+};
+
 /** Build the watcher config from env, with the backtested defaults. */
 export function fadeWatchConfigFromEnv(opts: { lead: string; breakeven: number }): FadeWatchConfig {
   const raw = (name: string): string | undefined => {
@@ -1071,7 +1095,7 @@ export function fadeWatchConfigFromEnv(opts: { lead: string; breakeven: number }
     autoMissAfterMin: num("FADE_AUTO_MISS_MIN", 120),
     againstPct: num("FADE_AGAINST_PCT", 0.3) / 100,
     // FADE_SHADOW=off disables the shadow rules.
-    shadowRules: (raw("FADE_SHADOW") ?? "on").toLowerCase() === "off" ? [] : [ARB_15M_SHADOW],
+    shadowRules: (raw("FADE_SHADOW") ?? "on").toLowerCase() === "off" ? [] : [ARB_15M_SHADOW, POLYMARKET_HOURLY_SHADOW],
     shadowJournalPath: raw("FADE_SHADOW_PATH") ?? "./data/fade-shadow.jsonl",
     // Confident once 50 calls have settled and the last 50 win ≥ 55%; back to
     // skeptical when they fall below breakeven.

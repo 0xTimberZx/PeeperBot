@@ -889,7 +889,7 @@ async function cmdFadeWatch(flags: Map<string, string>): Promise<void> {
         const bt = rule.backtest[sym];
         console.log(`  ${sym.padEnd(10)} n=${s.n}  win ${p(s.wins / s.n)}${bt === undefined ? "" : `  (backtest ${p(bt)})`}`);
       }
-      console.log(sc.settled < 100 ? `  Judge it at 100+ settled setups (~3–5 weeks); until then it's too few to tell from luck.` : sc.wilsonLow > breakeven ? `  The 95% floor is above breakeven: candidate to promote to a real alert.` : `  Not proven yet: the 95% floor is still below breakeven.`);
+      console.log(sc.settled < 100 ? `  Judge it at 100+ settled setups; until then it's too few to tell from luck.` : sc.wilsonLow > breakeven ? `  The 95% floor is above breakeven: candidate to promote to a real alert.` : `  Not proven yet: the 95% floor is still below breakeven.`);
     }
     // Near the 24h low: is the stronger setup still stronger live?
     const nl = watchCfg.nearLow;
