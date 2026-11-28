@@ -1,0 +1,280 @@
+[updown] fetching 155520 × 5m bars each for COREUSDT, BTCUSDT, ETHUSDT…
+period 2023-12-14 → 2025-06-06 · lead COREUSDT · payout 1.9×
+
+═══════ Up-down middle on fade calls · BTCUSDT ═══════
+breakeven 52.6% · EV in stakes per bet (win +0.9, loss −1, flat = loss)
+plain fade (first bet on every call): 56.3% (floor 53.8%, n=1548) · EV +0.069/bet EDGE
+
+check 5m in · move ≥ 0.00%
+  MIDDLE (in the money → add the opposite bet), 819 of 1548 calls
+    added opposite bet: 44.2% (floor 40.8%, n=819) · EV -0.160/bet no edge
+    both won (the middle): 14.9%
+    these calls, first bet alone EV +0.343 → with the middle +0.183 (per call, 2 stakes)
+    added bet by third (old / mid / new): 44.8% n=286 / 41.5% n=253 / 46.1% n=280
+  DOUBLE-DOWN (out of the money → add the same way), 728 calls
+    added same-way bet: 56.0% (floor 52.4%, n=728) · EV +0.065/bet unproven
+    these calls, first bet alone EV -0.241 → with the double -0.176
+    added bet by third (old / mid / new): 53.9% n=228 / 58.1% n=258 / 55.8% n=242
+
+check 5m in · move ≥ 0.05%
+  MIDDLE (in the money → add the opposite bet), 646 of 1548 calls
+    added opposite bet: 44.6% (floor 40.8%, n=646) · EV -0.153/bet no edge
+    both won (the middle): 17.8%
+    these calls, first bet alone EV +0.391 → with the middle +0.238 (per call, 2 stakes)
+    added bet by third (old / mid / new): 42.7% n=227 / 43.9% n=196 / 47.1% n=223
+  DOUBLE-DOWN (out of the money → add the same way), 555 calls
+    added same-way bet: 56.0% (floor 51.9%, n=555) · EV +0.065/bet unproven
+    these calls, first bet alone EV -0.326 → with the double -0.261
+    added bet by third (old / mid / new): 55.5% n=173 / 57.4% n=204 / 55.1% n=178
+
+check 5m in · move ≥ 0.10%
+  MIDDLE (in the money → add the opposite bet), 500 of 1548 calls
+    added opposite bet: 44.2% (floor 39.9%, n=500) · EV -0.160/bet no edge
+    both won (the middle): 19.2%
+    these calls, first bet alone EV +0.425 → with the middle +0.265 (per call, 2 stakes)
+    added bet by third (old / mid / new): 41.7% n=168 / 43.2% n=162 / 47.6% n=170
+  DOUBLE-DOWN (out of the money → add the same way), 420 calls
+    added same-way bet: 56.0% (floor 51.2%, n=420) · EV +0.063/bet unproven
+    these calls, first bet alone EV -0.362 → with the double -0.299
+    added bet by third (old / mid / new): 54.5% n=132 / 57.0% n=149 / 56.1% n=139
+
+check 5m in · move ≥ 0.20%
+  MIDDLE (in the money → add the opposite bet), 276 of 1548 calls
+    added opposite bet: 40.9% (floor 35.3%, n=276) · EV -0.222/bet no edge
+    both won (the middle): 18.5%
+    these calls, first bet alone EV +0.473 → with the middle +0.251 (per call, 2 stakes)
+    added bet by third (old / mid / new): 37.0% n=92 / 39.3% n=89 / 46.3% n=95
+  DOUBLE-DOWN (out of the money → add the same way), 241 calls
+    added same-way bet: 56.8% (floor 50.5%, n=241) · EV +0.080/bet unproven
+    these calls, first bet alone EV -0.393 → with the double -0.313
+    added bet by third (old / mid / new): 60.5% n=76 / 60.3% n=78 / 50.6% n=87
+
+check 10m in · move ≥ 0.00%
+  MIDDLE (in the money → add the opposite bet), 855 of 1548 calls
+    added opposite bet: 44.8% (floor 41.5%, n=855) · EV -0.149/bet no edge
+    both won (the middle): 18.9%
+    these calls, first bet alone EV +0.409 → with the middle +0.260 (per call, 2 stakes)
+    added bet by third (old / mid / new): 48.0% n=277 / 41.6% n=291 / 44.9% n=287
+  DOUBLE-DOWN (out of the money → add the same way), 692 calls
+    added same-way bet: 55.8% (floor 52.1%, n=692) · EV +0.060/bet unproven
+    these calls, first bet alone EV -0.349 → with the double -0.289
+    added bet by third (old / mid / new): 53.4% n=236 / 59.1% n=220 / 55.1% n=236
+
+check 10m in · move ≥ 0.05%
+  MIDDLE (in the money → add the opposite bet), 715 of 1548 calls
+    added opposite bet: 44.6% (floor 41.0%, n=715) · EV -0.152/bet no edge
+    both won (the middle): 22.2%
+    these calls, first bet alone EV +0.475 → with the middle +0.323 (per call, 2 stakes)
+    added bet by third (old / mid / new): 47.7% n=235 / 42.6% n=249 / 43.7% n=231
+  DOUBLE-DOWN (out of the money → add the same way), 573 calls
+    added same-way bet: 53.9% (floor 49.8%, n=573) · EV +0.025/bet unproven
+    these calls, first bet alone EV -0.450 → with the double -0.425
+    added bet by third (old / mid / new): 53.4% n=191 / 58.2% n=182 / 50.5% n=200
+
+check 10m in · move ≥ 0.10%
+  MIDDLE (in the money → add the opposite bet), 576 of 1548 calls
+    added opposite bet: 43.8% (floor 39.8%, n=576) · EV -0.169/bet no edge
+    both won (the middle): 24.0%
+    these calls, first bet alone EV +0.524 → with the middle +0.355 (per call, 2 stakes)
+    added bet by third (old / mid / new): 46.7% n=195 / 42.0% n=193 / 42.6% n=188
+  DOUBLE-DOWN (out of the money → add the same way), 478 calls
+    added same-way bet: 52.5% (floor 48.0%, n=478) · EV -0.002/bet no edge
+    these calls, first bet alone EV -0.523 → with the double -0.525
+    added bet by third (old / mid / new): 51.9% n=162 / 56.4% n=156 / 49.4% n=160
+
+check 10m in · move ≥ 0.20%
+  MIDDLE (in the money → add the opposite bet), 370 of 1548 calls
+    added opposite bet: 41.9% (floor 37.0%, n=370) · EV -0.204/bet no edge
+    both won (the middle): 27.0%
+    these calls, first bet alone EV +0.618 → with the middle +0.414 (per call, 2 stakes)
+    added bet by third (old / mid / new): 43.9% n=132 / 39.8% n=113 / 41.6% n=125
+  DOUBLE-DOWN (out of the money → add the same way), 336 calls
+    added same-way bet: 54.5% (floor 49.1%, n=336) · EV +0.035/bet unproven
+    these calls, first bet alone EV -0.570 → with the double -0.535
+    added bet by third (old / mid / new): 56.3% n=119 / 55.5% n=110 / 51.4% n=107
+
+check 15m in · move ≥ 0.00%
+  MIDDLE (in the money → add the opposite bet), 842 of 1548 calls
+    added opposite bet: 45.8% (floor 42.5%, n=842) · EV -0.129/bet no edge
+    both won (the middle): 25.1%
+    these calls, first bet alone EV +0.505 → with the middle +0.376 (per call, 2 stakes)
+    added bet by third (old / mid / new): 47.5% n=280 / 48.1% n=289 / 41.8% n=273
+  DOUBLE-DOWN (out of the money → add the same way), 705 calls
+    added same-way bet: 53.9% (floor 50.2%, n=705) · EV +0.024/bet unproven
+    these calls, first bet alone EV -0.450 → with the double -0.426
+    added bet by third (old / mid / new): 55.4% n=233 / 58.6% n=222 / 48.4% n=250
+
+check 15m in · move ≥ 0.05%
+  MIDDLE (in the money → add the opposite bet), 723 of 1548 calls
+    added opposite bet: 47.2% (floor 43.6%, n=723) · EV -0.104/bet no edge
+    both won (the middle): 28.4%
+    these calls, first bet alone EV +0.543 → with the middle +0.439 (per call, 2 stakes)
+    added bet by third (old / mid / new): 48.9% n=237 / 47.8% n=247 / 44.8% n=239
+  DOUBLE-DOWN (out of the money → add the same way), 607 calls
+    added same-way bet: 53.2% (floor 49.2%, n=607) · EV +0.011/bet unproven
+    these calls, first bet alone EV -0.534 → with the double -0.523
+    added bet by third (old / mid / new): 55.0% n=211 / 57.9% n=190 / 47.1% n=206
+
+check 15m in · move ≥ 0.10%
+  MIDDLE (in the money → add the opposite bet), 624 of 1548 calls
+    added opposite bet: 45.2% (floor 41.3%, n=624) · EV -0.141/bet no edge
+    both won (the middle): 30.9%
+    these calls, first bet alone EV +0.629 → with the middle +0.488 (per call, 2 stakes)
+    added bet by third (old / mid / new): 47.5% n=202 / 46.0% n=215 / 42.0% n=207
+  DOUBLE-DOWN (out of the money → add the same way), 510 calls
+    added same-way bet: 53.7% (floor 49.4%, n=510) · EV +0.021/bet unproven
+    these calls, first bet alone EV -0.594 → with the double -0.573
+    added bet by third (old / mid / new): 55.6% n=178 / 57.0% n=158 / 48.9% n=174
+
+check 15m in · move ≥ 0.20%
+  MIDDLE (in the money → add the opposite bet), 431 of 1548 calls
+    added opposite bet: 44.1% (floor 39.5%, n=431) · EV -0.162/bet no edge
+    both won (the middle): 33.4%
+    these calls, first bet alone EV +0.697 → with the middle +0.535 (per call, 2 stakes)
+    added bet by third (old / mid / new): 47.0% n=149 / 44.5% n=146 / 40.4% n=136
+  DOUBLE-DOWN (out of the money → add the same way), 362 calls
+    added same-way bet: 53.6% (floor 48.4%, n=362) · EV +0.018/bet unproven
+    these calls, first bet alone EV -0.659 → with the double -0.641
+    added bet by third (old / mid / new): 56.6% n=129 / 55.0% n=111 / 49.2% n=122
+
+The added bet earns its place only if it wins above breakeven on its own (EV > 0) and holds in every third.
+═══════════════════════════════════
+
+═══════ Up-down middle on fade calls · ETHUSDT ═══════
+breakeven 52.6% · EV in stakes per bet (win +0.9, loss −1, flat = loss)
+plain fade (first bet on every call): 54.8% (floor 52.4%, n=1627) · EV +0.042/bet unproven
+
+check 5m in · move ≥ 0.00%
+  MIDDLE (in the money → add the opposite bet), 874 of 1627 calls
+    added opposite bet: 45.1% (floor 41.8%, n=874) · EV -0.143/bet no edge
+    both won (the middle): 14.9%
+    these calls, first bet alone EV +0.326 → with the middle +0.183 (per call, 2 stakes)
+    added bet by third (old / mid / new): 46.9% n=307 / 41.9% n=270 / 46.1% n=297
+  DOUBLE-DOWN (out of the money → add the same way), 752 calls
+    added same-way bet: 55.3% (floor 51.7%, n=752) · EV +0.051/bet unproven
+    these calls, first bet alone EV -0.290 → with the double -0.239
+    added bet by third (old / mid / new): 53.4% n=236 / 58.7% n=259 / 53.7% n=257
+
+check 5m in · move ≥ 0.05%
+  MIDDLE (in the money → add the opposite bet), 735 of 1627 calls
+    added opposite bet: 45.4% (floor 41.9%, n=735) · EV -0.137/bet no edge
+    both won (the middle): 17.1%
+    these calls, first bet alone EV +0.362 → with the middle +0.226 (per call, 2 stakes)
+    added bet by third (old / mid / new): 45.3% n=247 / 43.4% n=226 / 47.3% n=262
+  DOUBLE-DOWN (out of the money → add the same way), 616 calls
+    added same-way bet: 56.0% (floor 52.1%, n=616) · EV +0.064/bet unproven
+    these calls, first bet alone EV -0.346 → with the double -0.282
+    added bet by third (old / mid / new): 56.0% n=184 / 58.8% n=211 / 53.4% n=221
+
+check 5m in · move ≥ 0.10%
+  MIDDLE (in the money → add the opposite bet), 608 of 1627 calls
+    added opposite bet: 45.6% (floor 41.6%, n=608) · EV -0.134/bet no edge
+    both won (the middle): 18.9%
+    these calls, first bet alone EV +0.394 → with the middle +0.259 (per call, 2 stakes)
+    added bet by third (old / mid / new): 44.4% n=205 / 43.6% n=181 / 48.2% n=222
+  DOUBLE-DOWN (out of the money → add the same way), 508 calls
+    added same-way bet: 55.1% (floor 50.8%, n=508) · EV +0.047/bet unproven
+    these calls, first bet alone EV -0.402 → with the double -0.354
+    added bet by third (old / mid / new): 53.3% n=137 / 58.4% n=178 / 53.4% n=193
+
+check 5m in · move ≥ 0.20%
+  MIDDLE (in the money → add the opposite bet), 379 of 1627 calls
+    added opposite bet: 44.3% (floor 39.4%, n=379) · EV -0.158/bet no edge
+    both won (the middle): 21.1%
+    these calls, first bet alone EV +0.459 → with the middle +0.301 (per call, 2 stakes)
+    added bet by third (old / mid / new): 45.8% n=118 / 44.4% n=108 / 43.1% n=153
+  DOUBLE-DOWN (out of the money → add the same way), 329 calls
+    added same-way bet: 56.5% (floor 51.1%, n=329) · EV +0.074/bet unproven
+    these calls, first bet alone EV -0.446 → with the double -0.371
+    added bet by third (old / mid / new): 56.6% n=83 / 58.8% n=114 / 54.5% n=132
+
+check 10m in · move ≥ 0.00%
+  MIDDLE (in the money → add the opposite bet), 875 of 1627 calls
+    added opposite bet: 43.0% (floor 39.7%, n=875) · EV -0.184/bet no edge
+    both won (the middle): 19.1%
+    these calls, first bet alone EV +0.446 → with the middle +0.263 (per call, 2 stakes)
+    added bet by third (old / mid / new): 44.8% n=306 / 40.6% n=276 / 43.3% n=293
+  DOUBLE-DOWN (out of the money → add the same way), 752 calls
+    added same-way bet: 51.5% (floor 47.9%, n=752) · EV -0.022/bet no edge
+    these calls, first bet alone EV -0.429 → with the double -0.451
+    added bet by third (old / mid / new): 47.3% n=237 / 57.3% n=253 / 49.6% n=262
+
+check 10m in · move ≥ 0.05%
+  MIDDLE (in the money → add the opposite bet), 765 of 1627 calls
+    added opposite bet: 43.7% (floor 40.2%, n=765) · EV -0.170/bet no edge
+    both won (the middle): 21.6%
+    these calls, first bet alone EV +0.480 → with the middle +0.310 (per call, 2 stakes)
+    added bet by third (old / mid / new): 45.3% n=258 / 41.4% n=239 / 44.0% n=268
+  DOUBLE-DOWN (out of the money → add the same way), 653 calls
+    added same-way bet: 51.5% (floor 47.6%, n=653) · EV -0.022/bet no edge
+    these calls, first bet alone EV -0.473 → with the double -0.496
+    added bet by third (old / mid / new): 48.1% n=210 / 56.2% n=217 / 50.0% n=226
+
+check 10m in · move ≥ 0.10%
+  MIDDLE (in the money → add the opposite bet), 663 of 1627 calls
+    added opposite bet: 43.6% (floor 39.9%, n=663) · EV -0.172/bet no edge
+    both won (the middle): 23.4%
+    these calls, first bet alone EV +0.516 → with the middle +0.344 (per call, 2 stakes)
+    added bet by third (old / mid / new): 46.3% n=214 / 40.3% n=211 / 44.1% n=238
+  DOUBLE-DOWN (out of the money → add the same way), 555 calls
+    added same-way bet: 52.1% (floor 47.9%, n=555) · EV -0.011/bet no edge
+    these calls, first bet alone EV -0.514 → with the double -0.525
+    added bet by third (old / mid / new): 48.9% n=176 / 58.4% n=185 / 49.0% n=194
+
+check 10m in · move ≥ 0.20%
+  MIDDLE (in the money → add the opposite bet), 504 of 1627 calls
+    added opposite bet: 43.3% (floor 39.0%, n=504) · EV -0.178/bet no edge
+    both won (the middle): 25.2%
+    these calls, first bet alone EV +0.557 → with the middle +0.379 (per call, 2 stakes)
+    added bet by third (old / mid / new): 45.6% n=160 / 39.7% n=151 / 44.0% n=193
+  DOUBLE-DOWN (out of the money → add the same way), 405 calls
+    added same-way bet: 52.6% (floor 47.7%, n=405) · EV -0.001/bet no edge
+    these calls, first bet alone EV -0.597 → with the double -0.597
+    added bet by third (old / mid / new): 51.7% n=120 / 54.5% n=132 / 51.6% n=153
+
+check 15m in · move ≥ 0.00%
+  MIDDLE (in the money → add the opposite bet), 885 of 1627 calls
+    added opposite bet: 44.9% (floor 41.6%, n=885) · EV -0.148/bet no edge
+    both won (the middle): 24.5%
+    these calls, first bet alone EV +0.514 → with the middle +0.366 (per call, 2 stakes)
+    added bet by third (old / mid / new): 46.2% n=303 / 46.9% n=286 / 41.6% n=296
+  DOUBLE-DOWN (out of the money → add the same way), 740 calls
+    added same-way bet: 55.1% (floor 51.5%, n=740) · EV +0.048/bet unproven
+    these calls, first bet alone EV -0.520 → with the double -0.472
+    added bet by third (old / mid / new): 55.6% n=239 / 59.5% n=242 / 50.6% n=259
+
+check 15m in · move ≥ 0.05%
+  MIDDLE (in the money → add the opposite bet), 813 of 1627 calls
+    added opposite bet: 44.4% (floor 41.0%, n=813) · EV -0.156/bet no edge
+    both won (the middle): 26.6%
+    these calls, first bet alone EV +0.561 → with the middle +0.405 (per call, 2 stakes)
+    added bet by third (old / mid / new): 45.9% n=279 / 46.9% n=262 / 40.4% n=272
+  DOUBLE-DOWN (out of the money → add the same way), 659 calls
+    added same-way bet: 55.1% (floor 51.3%, n=659) · EV +0.047/bet unproven
+    these calls, first bet alone EV -0.576 → with the double -0.530
+    added bet by third (old / mid / new): 55.1% n=207 / 58.7% n=213 / 51.9% n=239
+
+check 15m in · move ≥ 0.10%
+  MIDDLE (in the money → add the opposite bet), 736 of 1627 calls
+    added opposite bet: 44.8% (floor 41.3%, n=736) · EV -0.148/bet no edge
+    both won (the middle): 28.8%
+    these calls, first bet alone EV +0.595 → with the middle +0.447 (per call, 2 stakes)
+    added bet by third (old / mid / new): 46.2% n=249 / 47.8% n=232 / 40.8% n=255
+  DOUBLE-DOWN (out of the money → add the same way), 597 calls
+    added same-way bet: 54.8% (floor 50.8%, n=597) · EV +0.041/bet unproven
+    these calls, first bet alone EV -0.624 → with the double -0.584
+    added bet by third (old / mid / new): 54.7% n=190 / 56.8% n=192 / 53.0% n=215
+
+check 15m in · move ≥ 0.20%
+  MIDDLE (in the money → add the opposite bet), 572 of 1627 calls
+    added opposite bet: 44.4% (floor 40.4%, n=572) · EV -0.156/bet no edge
+    both won (the middle): 31.1%
+    these calls, first bet alone EV +0.648 → with the middle +0.491 (per call, 2 stakes)
+    added bet by third (old / mid / new): 44.7% n=190 / 46.1% n=180 / 42.6% n=202
+  DOUBLE-DOWN (out of the money → add the same way), 458 calls
+    added same-way bet: 55.0% (floor 50.4%, n=458) · EV +0.045/bet unproven
+    these calls, first bet alone EV -0.681 → with the double -0.635
+    added bet by third (old / mid / new): 53.8% n=143 / 59.6% n=151 / 51.8% n=164
+
+The added bet earns its place only if it wins above breakeven on its own (EV > 0) and holds in every third.
+═══════════════════════════════════
