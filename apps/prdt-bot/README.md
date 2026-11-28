@@ -602,7 +602,7 @@ npm run bot:fadewatch -- --report   # score every past alert against price
 
   Not sent while quiet (still logged, and still scored by `--report`): "bet
   losing" warnings while a call is open, the review after each call settles, and confidence-stage changes.
-  Still sent: sandwich bets (only while confident), answers to your won /
+  Still sent: answers to your won /
   lost / missed replies, and the daily imbalance callout (at most one per
   24h; `IMBALANCE_OFF=1` stops it).
   `FADE_QUIET=off` brings back the long alerts and every message above.
@@ -652,7 +652,10 @@ npm run bot:fadewatch -- --report   # score every past alert against price
   both lost about 40% of the times it fired. Why not streaks: a win did not
   make the next win likelier (57.3% after a win, 56.4% after a loss). Setups
   are logged to `data/fade-sandwiches.jsonl` even while skeptical, and
-  `--report` scores them. `FADE_SANDWICH=off` disables them;
+  `--report` scores them. **Off by default**: rechecked over two 540-day
+  windows (`reports/updown-*.txt`), the added same-way bet won 52–57% but
+  never cleared its 95% floor, and the opposite-bet "middle" lost in both, so
+  the bot sends the plain fade only. `FADE_SANDWICH=on` turns sandwiches back on;
   `FADE_SANDWICH_DIP_PCT`, `FADE_SANDWICH_WITHIN_MIN`, `FADE_CONFIDENCE_WINDOW`
   and `FADE_CONFIDENCE_UP_PCT` tune them.
 - **Unattended**: `.github/workflows/fade-watch.yml` runs the loop on GitHub

@@ -39,6 +39,13 @@ describe("readStage", () => {
     expect(stageChangeMessage("skeptical", readStage("skeptical", rec(28), C), C)).toContain("now in confident mode");
     expect(stageChangeMessage("confident", readStage("confident", rec(20), C), C)).toContain("back in skeptical mode");
   });
+
+  it("never promises second-bet alerts when they are off", () => {
+    const confident = readStage("skeptical", rec(28), C);
+    expect(stageLine(confident, C, false)).toContain("single bets only");
+    expect(stageLine(confident, C, false)).not.toContain("second-bet");
+    expect(stageChangeMessage("skeptical", confident, C, false)).not.toContain("second-bet");
+  });
 });
 
 describe("sandwich scoring", () => {

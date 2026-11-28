@@ -952,7 +952,7 @@ async function cmdFadeWatch(flags: Map<string, string>): Promise<void> {
     }
     const results = reviews.slice().sort((a, b) => a.alertTs - b.alertTs).map((r) => r.finalPct > 0);
     const reading = readStage(stage, results, watchCfg.confidence);
-    console.log(`\nConfidence · ${stageLine(reading, watchCfg.confidence)}`);
+    console.log(`\nConfidence · ${stageLine(reading, watchCfg.confidence, watchCfg.sandwich.enabled)}`);
     const sws = new SandwichLog(watchCfg.sandwichesPath ?? "./data/fade-sandwiches.jsonl").readAll();
     if (sws.length > 0) {
       const scored: { rec: SandwichRecord; outcome: SandwichOutcome }[] = [];

@@ -247,6 +247,20 @@ describe("FadeWatcher shadow rules", () => {
   });
 });
 
+describe("dip sandwich default", () => {
+  it("is off unless FADE_SANDWICH=on", async () => {
+    const { fadeWatchConfigFromEnv } = await import("./fadeWatch.js");
+    delete process.env["FADE_SANDWICH"];
+    expect(fadeWatchConfigFromEnv({ lead: "COREUSDT", breakeven: 0.526 }).sandwich.enabled).toBe(false);
+    process.env["FADE_SANDWICH"] = "on";
+    try {
+      expect(fadeWatchConfigFromEnv({ lead: "COREUSDT", breakeven: 0.526 }).sandwich.enabled).toBe(true);
+    } finally {
+      delete process.env["FADE_SANDWICH"];
+    }
+  });
+});
+
 describe("ARB_15M_SHADOW", () => {
   it("is the backtested rule: 15m window and hold, ARB ≥1.5% and target ≥0.15% dump", async () => {
     const { ARB_15M_SHADOW, fadeWatchConfigFromEnv } = await import("./fadeWatch.js");

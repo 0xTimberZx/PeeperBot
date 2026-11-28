@@ -74,26 +74,33 @@ const pc = (x: number): string => `${(x * 100).toFixed(0)}%`;
 const pc1 = (x: number): string => `${(x * 100).toFixed(1)}%`;
 
 /** One line for every alert: where the bot stands and why. */
-export function stageLine(r: StageReading, p: ConfidenceParams): string {
-  if (r.stage === "confident") return `Mode: confident — last ${p.window} won ${pc(r.rate ?? 0)}, so second-bet alerts are on.`;
+export function stageLine(r: StageReading, p: ConfidenceParams, secondBets = true): string {
+  if (r.stage === "confident")
+    return secondBets
+      ? `Mode: confident — last ${p.window} won ${pc(r.rate ?? 0)}, so second-bet alerts are on.`
+      : `Mode: confident — last ${p.window} won ${pc(r.rate ?? 0)} · single bets only.`;
   if (r.settled < p.minSettled) return `Mode: skeptical — single bets only until ${p.minSettled} results are in (${r.settled} so far).`;
   return `Mode: skeptical — single bets only (last ${p.window} won ${pc(r.rate ?? 0)}; needs ${pc(p.upAt)}).`;
 }
 
 /** The message sent when the stage changes. */
-export function stageChangeMessage(from: Stage, r: StageReading, p: ConfidenceParams): string {
+export function stageChangeMessage(from: Stage, r: StageReading, p: ConfidenceParams, secondBets = true): string {
   const rec = `Last ${p.window} results: ${r.wins} won (${pc(r.rate ?? 0)})`;
   if (from === "skeptical" && r.stage === "confident") {
     return [
       `📈 Bot is now in confident mode`,
       `${rec}, above the ${pc(p.upAt)} bar.`,
-      `If a bet dips early you'll now also get an optional second-bet alert. Back to single bets if the last ${p.window} drop below ${pc1(p.downBelow)}.`,
+      secondBets
+        ? `If a bet dips early you'll now also get an optional second-bet alert. Back to single bets if the last ${p.window} drop below ${pc1(p.downBelow)}.`
+        : `Still single bets only. Back to skeptical if the last ${p.window} drop below ${pc1(p.downBelow)}.`,
     ].join("\n");
   }
   return [
     `📉 Bot is back in skeptical mode`,
     `${rec}, below the ${pc1(p.downBelow)} needed to profit.`,
-    `Single bets only until the last ${p.window} reach ${pc(p.upAt)}. If it keeps sliding, the signal may have stopped working.`,
+    secondBets
+      ? `Single bets only until the last ${p.window} reach ${pc(p.upAt)}. If it keeps sliding, the signal may have stopped working.`
+      : `Back to confident once the last ${p.window} reach ${pc(p.upAt)}. If it keeps sliding, the signal may have stopped working.`,
   ].join("\n");
 }
 
