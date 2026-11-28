@@ -27,6 +27,7 @@
     "aave": "tsx src/cli.ts aave",
     "imbalance": "tsx src/cli.ts imbalance",
     "band": "tsx src/cli.ts band",
+    "updown": "tsx src/cli.ts updown",
     "log": "tsx src/cli.ts log",
     "autopsy": "tsx src/cli.ts autopsy",
     "follow": "tsx src/cli.ts follow",

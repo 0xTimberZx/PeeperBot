@@ -34,11 +34,11 @@ name: Fade watch
 #
 # Confidence: the bot starts SKEPTICAL (single-bet alerts only). Once 50 calls
 # have settled and the last 50 win 55%+ (FADE_CONFIDENCE_WINDOW / _UP_PCT) it
-# turns CONFIDENT and also sends dip-sandwich alerts: if an open call goes 0.2%
-# against within 15 min (FADE_SANDWICH_DIP_PCT / _WITHIN_MIN), add a second bet
-# that settles with the first. Below breakeven it drops back to skeptical.
-# Sandwich setups are logged to data/fade-sandwiches.jsonl either way.
-# FADE_SANDWICH=off disables them entirely.
+# turns CONFIDENT. Below breakeven it drops back to skeptical. Either way the
+# bot sends single fade bets only: the dip sandwich (a second same-way bet when
+# an open call goes 0.2% against within 15 min) is off by default, unproven in
+# two 540-day windows. FADE_SANDWICH=on turns it back on (logged to
+# data/fade-sandwiches.jsonl, sent while confident).
 #
 # Quiet (default): every fade call is sent in two lines; near-low ones are
 # marked (unproven, scored separately by --report), top-of-range ones cautioned.

@@ -489,7 +489,7 @@ export class FadeWatcher {
     this.state.stage = r.stage;
     this.state.stageSince = now;
     this.persist();
-    const text = stageChangeMessage(prev, r, this.cfg.confidence);
+    const text = stageChangeMessage(prev, r, this.cfg.confidence, this.cfg.sandwich.enabled);
     console.log(`[fadewatch] stage ${prev} → ${r.stage} (last ${this.cfg.confidence.window}: ${r.wins} won)`);
     if (this.cfg.quiet === true) return r;
     try {
@@ -836,7 +836,7 @@ export class FadeWatcher {
           (atTop ? `${TOP_OF_RANGE_CAUTION}\n` : "") +
           (recentLine === null ? "" : `${recentLine}\n`) +
           (lossLine === null ? "" : `${lossLine}\n`) +
-          stageLine(reading, this.cfg.confidence) +
+          stageLine(reading, this.cfg.confidence, this.cfg.sandwich.enabled) +
           (nyOpen ? `\n${NY_OPEN_CAUTION}` : ""),
         strategy: "fade-watch",
         live: false,
@@ -1103,9 +1103,11 @@ export function fadeWatchConfigFromEnv(opts: { lead: string; breakeven: number }
       upAt: num("FADE_CONFIDENCE_UP_PCT", 55) / 100,
       downBelow: opts.breakeven,
     },
-    // FADE_SANDWICH=off disables the dip sandwich (not even logged).
+    // The dip sandwich (a second same-way bet) is off by default: in two
+    // 540-day windows the added bet never cleared its 95% floor (unproven).
+    // FADE_SANDWICH=on turns it back on (logged always, sent while confident).
     sandwich: {
-      enabled: (raw("FADE_SANDWICH") ?? "on").toLowerCase() !== "off",
+      enabled: (raw("FADE_SANDWICH") ?? "off").toLowerCase() === "on",
       dipPct: num("FADE_SANDWICH_DIP_PCT", 0.2) / 100,
       withinMin: num("FADE_SANDWICH_WITHIN_MIN", 15),
     },

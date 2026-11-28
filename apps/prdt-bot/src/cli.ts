@@ -43,6 +43,7 @@ import { FadeOutcomeLog, TelegramInbox, callKey, formatRecord, latestOutcomes, w
 import { ImbalanceWatcher, imbalanceConfigFromEnv } from "./watch/imbalanceWatch.js";
 import { describeGap, describeStats, fmtPrice } from "./analysis/imbalance.js";
 import { analyzeBand, formatBand, DEFAULT_BAND_PARAMS, type BandParams } from "./analysis/band.js";
+import { upDownTrades, upDownStats, formatUpDown, thirdsOf, DEFAULT_UPDOWN_PARAMS } from "./analysis/updown.js";
 import { FadeReviewLog } from "./watch/fadeReview.js";
 import {
   readStage, SandwichLog, sandwichOutcome, stageLine, summarizeSandwiches,
@@ -951,7 +952,7 @@ async function cmdFadeWatch(flags: Map<string, string>): Promise<void> {
     }
     const results = reviews.slice().sort((a, b) => a.alertTs - b.alertTs).map((r) => r.finalPct > 0);
     const reading = readStage(stage, results, watchCfg.confidence);
-    console.log(`\nConfidence · ${stageLine(reading, watchCfg.confidence)}`);
+    console.log(`\nConfidence · ${stageLine(reading, watchCfg.confidence, watchCfg.sandwich.enabled)}`);
     const sws = new SandwichLog(watchCfg.sandwichesPath ?? "./data/fade-sandwiches.jsonl").readAll();
     if (sws.length > 0) {
       const scored: { rec: SandwichRecord; outcome: SandwichOutcome }[] = [];
@@ -1196,6 +1197,42 @@ async function cmdAave(flags: Map<string, string>): Promise<void> {
  * 24h band test: does the closer, retested edge of the last 24h range pick the
  * trade? A = as a filter on fade calls, B = as a strategy on its own.
  */
+/**
+ * Up-down middle on fade calls: when a call is in the money some minutes in,
+ * add the opposite bet to the same expiry (both win if price settles between).
+ * Also scores the double-down mirror. Sweeps the check time and minimum move.
+ *   updown [--days 540] [--checks 5,10,15] [--moves 0,0.05,0.1,0.2] [--skip-days N]
+ */
+async function cmdUpDown(flags: Map<string, string>): Promise<void> {
+  const cfg = loadConfig();
+  const lead = (flags.get("lead") ?? cfg.signalSymbol ?? "COREUSDT").toUpperCase();
+  const targets = (flags.get("target") ?? "BTCUSDT,ETHUSDT").toUpperCase().split(",").filter((x) => x.length > 0);
+  const days = Number(flags.get("days") ?? 540);
+  const count = Math.ceil((days * 1440) / 5);
+  const breakeven = 1 / cfg.payout;
+  const winProfit = cfg.payout - 1;
+  const checks = (flags.get("checks") ?? "5,10,15").split(",").map((m) => Math.round(Number(m) / 5)).filter((b) => b >= 1 && b < DEFAULT_FADE_PARAMS.holdBars);
+  const moves = (flags.get("moves") ?? "0,0.05,0.1,0.2").split(",").map((x) => Number(x) / 100).filter((x) => x >= 0);
+  const end = Date.now() - Number(flags.get("skip-days") ?? 0) * 86_400_000;
+  console.error(`[updown] fetching ${count} × 5m bars each for ${[lead, ...targets].join(", ")}…`);
+  const series: Candle[][] = [];
+  for (const symbol of [lead, ...targets]) series.push(await fetchHistory({ symbol, interval: "5m", count, endTime: end }));
+  const [leadCandles, ...targetCandles] = series;
+  const first = leadCandles![0]?.closeTime ?? 0;
+  console.log(`period ${new Date(first).toISOString().slice(0, 10)} → ${new Date(end).toISOString().slice(0, 10)} · lead ${lead} · payout ${cfg.payout}×`);
+  for (let k = 0; k < targets.length; k++) {
+    const rows = [];
+    for (const checkBars of checks) {
+      for (const minMovePct of moves) {
+        const p = { ...DEFAULT_UPDOWN_PARAMS, checkBars, minMovePct, winProfit };
+        const trades = upDownTrades(leadCandles!, targetCandles[k]!, p);
+        rows.push({ checkBars, minMovePct, stats: upDownStats(trades, p), thirds: thirdsOf(trades).map((t) => upDownStats(t, p)) });
+      }
+    }
+    console.log("\n" + formatUpDown(targets[k]!, rows, breakeven));
+  }
+}
+
 async function cmdBand(flags: Map<string, string>): Promise<void> {
   const cfg = loadConfig();
   const lead = (flags.get("lead") ?? cfg.signalSymbol ?? "COREUSDT").toUpperCase();
@@ -1552,6 +1589,9 @@ async function main(): Promise<void> {
       break;
     case "band":
       await cmdBand(flags);
+      break;
+    case "updown":
+      await cmdUpDown(flags);
       break;
     case "pivotfollow":
       await cmdPivotFollow(flags);
